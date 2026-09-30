@@ -1,0 +1,314 @@
+
+TV Box - IPTV / Rádió lejátszó (v17 - HU/SK bővítés, v16 képjavítás alapján)
+============================================================================
+CSATORNALISTA-BŐVÍTÉS (v17, 2026-09-12) - felhasználói kérésre:
+  - TV: további HU helyi/közéleti adók (Hír TV, Fix TV, Balaton TV,
+    TV Eger, Miskolc TV, Kecskemét TV, Vásárhelyi Televízió) - ezek a
+    saját üzemeltetőik közvetlen HLS-stream-jei, nem egy IPTV-
+    szolgáltatótól származnak.
+  - TV: további szlovák hír-/kereskedelmi csatornák (TA3, JOJ 24,
+    JOJ Šport, Wau, Jojko, RTVS Šport) egy közösségi proxy-n
+    (sktv.mxnticek.eu) keresztül - kényelmesek, de kicsit kevésbé
+    stabilak, mint a közvetlen szolgáltatói URL-ek.
+  - RÁDIÓ: új "Szlovák rádióadók" kategória kb. 28-30 adóval, a
+    közszolgálati RTVS-csatornáktól (Rádio Slovensko, Devín, Rádio_FM,
+    Regina, Patria, Litera, RSI) a legnépszerűbb kereskedelmi
+    adókig (Expres, Fun Rádio + al-adói, Europa 2, Vlna, Jemné, Kiss,
+    Best FM, Lumen, Anténa Rock, One, SiTy, WOW, Rebeca, Šport, stb.)
+  - FONTOS: ezek is nagyrészt ingyenes, harmadik féltől származó
+    stream-ek - némelyik időszakosan elérhetetlen lehet.
+
+------------------------------------------------------------------
+KORÁBBI (v16) CSATORNALISTA-BŐVÍTÉS (a felhasználó lista.txt fájlja + az
+iptv-org közösségi HU/SK gyűjtemény alapján, 2026-09-11):
+  - A lista.txt-ben szereplő, korábban a kódba még be nem épített
+    csatornák (pl. Ozone TV, Izaura TV, TV7 Békéscsaba, EWTN, Apostol TV,
+    UTV, NOE TV, Barrandov, Viasat Explore/History, FB Premium, MTV USA,
+    SpongeBob 24/7, Dance Television, valamint több szlovák Markíza-web
+    adás) mostantól szerepelnek a CHANNEL_DATA-ban, a "" elválasztós
+    URL-eket "/"-re javítva.
+  - A névtelenül szereplő rádió-URL (icast.connectmedia.hu/4738/mr2.mp3)
+    a stream-számozás (4724=MR1/Kossuth, 4738=MR2) alapján be lett
+    azonosítva Petőfi Rádióként.
+  - Új, saját ötletből hozzáadott csatornák (a nyilvánosan elérhető
+    iptv-org HU/SK gyűjteményből ellenőrizve): Prime, Super TV2, TV4,
+    Sorozat+, Sorozatklub, Story4, Slager TV, Zenebutik, Muzsika TV,
+    Kölyökklub, Life TV, M4 Sport, Sport 1/2, Spiler1/2, valamint
+    szlovák oldalon Jednotka, Dvojka, :24, Prima Cool/Krimi SK, TV Lux,
+    ducktv. Rádióból: Retro Rádió, Kossuth Rádió, Petőfi Rádió,
+    MegaDance Rádió, Oxygen Music Radio, Mercy Rádió.
+  - FONTOS: ezek nagyrészt ingyenes, harmadik féltől származó stream-ek -
+    némelyik időszakosan elérhetetlen lehet, ez a szolgáltatók oldalán
+    múlik, nem a lejátszó hibája.
+
+A V16 KÉPJAVÍTÁS:
+A v13 volt az utolsó verzió, amelyben a VLC-kép működött. Ezért a
+VLC natív videó-kimeneti útvonalát változtatás nélkül visszaállítottuk
+a v13-as állapotra. A v14-ben a set_xwindow/set_hwnd/set_nsobject
+hívás minden play_channel() előtt újra lefutott; ezt a kísérleti
+újrakötést eltávolítottuk. A v14 BrightnessOverlay rétege sincs benne,
+így az sem kerülhet a VLC natív videófelülete fölé.
+
+A YouTube/QtWebEngine funkció v13-as állapotban marad.
+
+JAVÍTOTT HIBÁK (v13) - felhasználó által jelentett hibák:
+
+1) ÖSSZEOMLÁS Enter-nyomásra a forrásváltóban a "YouTube" csempén (de
+   EGÉR-kattintásra nem). LEGVALÓSZÍNŰBB OK: a `_show_web_app()` a
+   QWebEngineView-ra tesz fókuszt, MIKÖZBEN Qt még épp az Enter billentyű-
+   esemény kézbesítését végzi a régi fókusz-widgeten - ez egy időzítés-
+   érzékeny, natív szintű versenyhelyzetet okozott a Chromium-
+   kompozitorral. JAVÍTVA: a webnézet megnyitása most `QTimer.singleShot(0, ...)`-
+   tal egy KÖVETKEZŐ eseményhurok-körre van halasztva mind az Enter-, mind
+   az egér-úton (utóbbin is, az egységesség és a jövőbeli hibák elkerülése
+   végett) - ez strukturálisan kizárja ezt a versenyhelyzetet.
+
+2) "B"-vel meg lehetett nyitni a forrásváltót a YouTube fölött, de UGYANAZZAL
+   a "B"-vel nem lehetett bezárni. OK: `_open_mode_menu_from_web_app()`
+   feltétel nélkül `open_mode_menu()`-t hívott - mivel ezt egy MINDVÉGIG
+   bekapcsolva maradó globális gyorsbillentyű hívja meg (amíg a webnézet
+   aktív), minden "B" újra csak MEGNYITOTTA a már nyitva lévő menüt.
+   JAVÍTVA: most valódi kapcsoló (toggle) - ha már nyitva van, bezárja.
+
+3) Reklám helyén átmeneti SÖTÉT/BERAGADT képernyő. OK: a beépített YouTube-
+   reklámblokkoló bizonyos hirdetés-végpontokat (pl. doubleclick.net,
+   /pagead/) hálózati szinten BLOKKOLT - a YouTube Leanback (TV) felülete
+   erre nem "reklám nélkül folytatja" választ adott, hanem egy darabig
+   hiába várt a (soha meg nem érkező) válaszra, sötét képernyőt mutatva,
+   mielőtt felismerte a hibát és továbblépett. A reklámblokkoló tehát
+   ZAVARÓBB élményt adott, mint maga a reklám. JAVÍTVA: a "YouTube
+   reklámblokkoló" beállítás alapértelmezetten KIKAPCSOLT (a Beállítások
+   menüben bármikor visszakapcsolható, de ott számítani kell erre a
+   mellékhatásra).
+
+4) YouTube-ról TV-re visszaváltva csak a HANG szólt, a KÉP nem jelent meg -
+   és ez utána M/csatornaváltás/hangerő/B megnyomására ÚJRA megismétlődött,
+   amíg a felhasználó ki nem kattintott az alkalmazásból (ami kikényszerít
+   egy natív újrarajzolást az ablakkezelőnél). ŐSZINTÉN: ez egy MÉLYEN
+   GYÖKEREZŐ, driver-/ablakkezelő-függő tünete annak, hogy KÉT FÜGGETLEN
+   natív GPU-kompozitor (a VLC saját videó-kimenete ÉS a Chromium/
+   QtWebEngine saját kompozitora) osztozik ugyanazon a top-level ablakon -
+   ez nem egy "hagyományos" Python-szintű hiba, amit garantáltan meg
+   lehetne oldani. BEST-EFFORT MITIGÁCIÓ: minden alkalommal, amikor egy
+   overlay (info-kártya, menü, hangerő-kijelző, stb.) megjelenik vagy
+   eltűnik, a `_kick_video_repaint()` egy apró (1 pixeles) geometria-
+   változtatással "megrugdossa" a VLC natív felületét, kikényszerítve egy
+   valódi újrarajzolást. Ez a legtöbb esetben megoldja a tünetet, de NEM
+   garantált 100%-osan minden GPU-n/ablakkezelőn - ha ez továbbra is
+   jelentkezik, komolyan érdemes megfontolni a YouTube-ot KÜLÖN
+   Brave-ablakban futtatni (lásd EXTERNAL_APPS), mert az teljesen
+   elkerüli ezt a konfliktust: ott a két natív renderelő sosem osztozik
+   egy ablakon.
+
+------------------------------------------------------------------
+KORÁBBI (v12) JAVÍTÁSOK
+------------------------------------------------------------------
+
+1) Nyilakkal csatornát lehetett váltani, amíg a YouTube-on voltunk.
+   OK: a keyPressEvent()-nek fogalma sem volt az `active_web_app`
+   állapotról, ezért minden billentyű (nyilak, számok, M, V, Space,
+   Backspace) simán átfolyt a normál TV-vezérlő logikába a webnézet
+   ALATT. JAVÍTVA: a keyPressEvent() elején (a súgó/Beállítások/
+   forrásváltó ellenőrzések UTÁN) most van egy `if self.active_web_app:`
+   védőháló, ami amíg a webnézet aktív, KIZÁRÓLAG az Esc/B/S billentyűket
+   engedi át, mindent mást elnyel.
+
+2) "M"-mel meg lehetett nyitni a csatornalistát a YouTube fölött.
+   Ugyanaz az ok/javítás, mint fent.
+
+3) A beágyazott YouTube néha összeomlott, ha korábban már megnyitották,
+   majd a programot újraindították ("crash után ismét jól megy néha").
+   LEGVALÓSZÍNŰBB OK: a webnézet az IMPLICIT, megosztott alapértelmezett
+   QtWebEngine-profilt használta, aminek lemezen élő Chromium zároló-
+   fájljai rendellenes leállás után "beragadhatnak". JAVÍTVA: a webnézet
+   most egy SAJÁT, nevesített profilt kap, kontrollált tárolási úttal
+   (lásd _prepare_webengine_storage_dir), ami induláskor eltávolítja az
+   esetleges beragadt zároló-fájlokat. Emellett visszakerült a
+   QApplication.AA_ShareOpenGLContexts beállítás is (ez a VLC natív
+   videó-kimenete és a Chromium GPU-folyamata közti kontextus-ütközést
+   hivatott elkerülni - ez a másik fő gyanúsított).
+   ŐSZINTÉN: ez egy natív (nem Python-szintű) összeomlás volt, amit ebben
+   a fejlesztői környezetben nem sikerült 1:1-ben reprodukálni, ezért a
+   fenti a legvalószínűbb ok alapján tett, alaposan indokolt javítás -
+   nem garantált 100%-os megoldás, de jelentősen csökkenti a kockázatot.
+
+4) "B" megnyomására a YouTube-ról AUTOMATIKUSAN visszaváltott TV-re, még
+   mielőtt a felhasználó bármit választott volna a forrásváltóban.
+   OK: `_open_mode_menu_from_web_app()` ELŐSZÖR visszaváltott TV/Rádióra,
+   és csak UTÁNA nyitotta meg a menüt. JAVÍTVA: most csak megnyitja a
+   forrásváltót A YOUTUBE FÖLÖTT (a webnézet aktív marad a háttérben) -
+   a tényleges váltás csak akkor történik meg, ha a felhasználó ott
+   ténylegesen kiválaszt egy másik forrást.
+
+5) Ezután a TV-n nem jelent meg a kép.
+   Ez a 4-es hiba következménye volt (a hibás, elhamarkodott újra-
+   lejátszás rossz időzítéssel futott le) - a 4-es javítása után ez a
+   tünet is megszűnik; emellett a 3-as pontban leírt GPU-kontextus-
+   javítás is közvetlenül ide kapcsolódik.
+
+TOVÁBBI VÁLTOZÁS (v12): a beépített YouTube-nézet URL-je visszaállt a
+youtube.com/tv (Leanback, D-pad-navigálható) felületre, Smart TV
+user-agenttel - enélkül a Google visszairányít a sima, egérre tervezett
+youtube.com-ra.
+
+------------------------------------------------------------------
+KORÁBBI (v10) - az "appon belüli" YouTube alapkoncepciója
+------------------------------------------------------------------
+Ez a verzió a YouTube-ot ténylegesen AZ ALKALMAZÁSON BELÜL nyitja meg
+(nem egy külön Brave-ablakban) - ugyanúgy lehet köztük váltani, mint TV
+és Rádió között.
+
+ÚJ (v10)
+------------------------------------------------------------------
+1) A YouTube (és a jövőben bármilyen más web-alkalmazás) most a QtWebEngine
+   (Chromium-alapú, Qt-be épített böngésző-motor) segítségével jelenik meg
+   közvetlenül a TV Box ablakában, teljes képernyőn - pontosan úgy, ahogy a
+   TV/Rádió is. Ehhez egy KÜLÖN csomag telepítése szükséges (lásd a fájl
+   elején lévő megjegyzést); ha ez nincs telepítve, a program automatikusan
+   visszaesik a korábbi, külön Brave-ablakos módra - semmi nem törik el.
+2) A forrásváltó ("B") menüben a YouTube csempe ugyanúgy egy választható
+   elem, mint a TV vagy a Rádió - kiválasztásra a teljes ablak azonnal a
+   YouTube-ra vált, nem nyílik semmilyen külön ablak.
+3) Mivel a beépített böngésző-nézet, amíg fókuszban van, "elnyeli" a
+   billentyűket (a Chromium-motor kezeli őket, nem a mi kódunk), az Esc és
+   a B billentyű globális gyorsbillentyűként van bekötve, ami AKKOR IS
+   működik, ha épp a böngészőé a fókusz - így bármikor egyetlen Esc-kel
+   vissza lehet váltani a legutóbb nézett TV/Rádió csatornára, vagy egy
+   B-vel egyenesen a forrásváltó menüt lehet megnyitni. Ez a két
+   gyorsbillentyű NORMÁL esetben (amíg nincs aktív webnézet) ki van
+   kapcsolva, hogy a megszokott Esc/B viselkedés máshol ne változzon.
+
+------------------------------------------------------------------
+KORÁBBI (v9) JAVÍTÁSOK
+------------------------------------------------------------------
+1) A YouTube-csempe korábban csak a Linuxon szokásos 'brave-browser' /
+   'brave-browser-stable' / 'brave' parancsneveket próbálta a PATH-on -
+   ez WINDOWS-on tipikusan sosem talál rá a Brave-re, mert a telepítője
+   nem teszi fel magát a PATH-ra. A keresés most három lépcsős:
+     1. PATH-on elérhető parancsnevek (`commands`) - ez működik a legtöbb
+        Linux csomagból (apt/deb) telepített Brave-nél, és flatpakos
+        telepítésnél is (`flatpak run com.brave.Browser`).
+     2. Operációs rendszerenkénti, jól ismert ABSZOLÚT elérési utak
+        (`_brave_common_paths()`) - ez fedi le a tipikus Windows-telepítést
+        (Program Files / %LOCALAPPDATA%), illetve a Linuxon snap/opt alá
+        telepített eseteket.
+     3. Ha ezek sem találják meg, a felhasználó saját kezűleg beírhatja a
+        pontos elérési útját az `EXTERNAL_APPS["youtube"]["extra_paths"]`
+        lista végére - a fájl elején lévő megjegyzés lépésről lépésre
+        leírja, hogyan találja meg ezt Windows-on és Linuxon is.
+   (A "Telepítés alkalmazásként" / PWA funkció a Brave-ben nem hoz létre
+   külön futtatható fájlt - ugyanazt a brave.exe/brave-browser programot
+   indítja el speciális argumentumokkal. Ezért elég magát a Brave-et
+   megtalálnunk, és `--app=https://www.youtube.com`-mal indítanunk - ez
+   ugyanolyan keret nélküli ablakot ad, mint a telepített PWA.)
+
+A v7-ben bevezetett javítások mind érvényben maradtak - lásd alább.
+
+------------------------------------------------------------------
+KORÁBBI (v7) JAVÍTÁSOK
+------------------------------------------------------------------
+1) FUNKCIONÁLIS HIBA - a billentyűzetes navigáció megállt a kategória-
+   fejléceken. A `_move_menu_selection()` tévesen `Qt.ItemIsEnabled`-t
+   vizsgált `Qt.ItemIsSelectable` helyett - mivel a fejléc-sorok is
+   "enabled"-ek (csak nem kiválaszthatók), a kurzor minden fejlécen
+   megállt ahelyett, hogy továbbugrott volna. Kategóriánként egyszer,
+   egy 9 kategóriás listán gyakorlatilag minden görgetésnél jelentkezett.
+
+2) Induláskori versenyhelyzet (400 ms-os ablak). A lejátszó esemény-
+   callbackjei (Playing/Error/Buffering) korábban egy 400 ms-mal
+   késleltetett `init_vlc()`-ben kötődtek be - ha a felhasználó ezalatt
+   csatornát váltott, a callbackek hiánya miatt a töltés-jelző örökre
+   "beragadhatott". A callbackek bekötése most szinkron módon, már a
+   konstruktorban megtörténik, a videó-kimenet beágyazása és az első
+   lejátszás pedig közvetlenül a `showFullScreen()` után, nem egy
+   külön időzítőn keresztül.
+
+3) Nem volt "watchdog" az elakadt (nem válaszoló) adásokhoz. Egy új,
+   12 másodperces időzítő minden csatornaváltáskor újraindul; ha ennyi
+   időn belül sem "lejátszás elindult", sem "hiba" jelzés nem érkezik a
+   lejátszótól, a program magától hibaállapotba vált, hogy a töltés-
+   jelző sose maradjon a végtelenségig a képernyőn.
+
+4) Az Esc/Q azonnal, megerősítés nélkül bezárta a teljes alkalmazást.
+   Most az első lenyomás egy megerősítő kártyát mutat ("Nyomd meg újra
+   a kilépéshez"), és csak a második, néhány másodpercen belüli lenyomás
+   zár be ténylegesen.
+
+5) Nem volt beépített billentyű-súgó. A "H" vagy "?" gomb egy automatikusan
+   eltűnő (de bármelyik gombra azonnal bezáródó) áttekintést mutat az
+   összes elérhető billentyűparancsról.
+
+6) Az egérgörgős hangerő fix ±5%-os lépésközzel dolgozott, ami egy
+   érintőpad/nagy felbontású görgő sok apró eseményénél könnyen
+   túllőhetett. A lépésköz most a tényleges görgetés-mértékkel arányos
+   (max. ±15%/esemény), ami finomabb, "debounce"-szerű vezérlést ad.
+
+7) Apróbb pontosítások: a csatornaszám-beírás mostantól elfogadja a
+   vezető nullát is (pl. "01" -> "1" csatorna), és ha a beírt szám
+   EGYÉRTELMŰEN egy létező csatornára utal (nincs hosszabb, ugyanezekkel
+   a számjegyekkel kezdődő csatornaszám), azonnal vált - nem kell
+   végigvárni a 3 másodperces türelmi időt. A korábbi néma
+   `except Exception: pass` blokkok most naplóznak (`logging` modul),
+   hogy hibakereséskor ne tűnjön el nyomtalanul egy induló hiba. Új:
+   egyetlen-példány védelem (`QSharedMemory`) - ha a program véletlenül
+   kétszer indulna el, a második példány szépen kilép ahelyett, hogy
+   versenyhelyzetben írná felül a beállításfájlt.
+
+A v6-ban bevezetett javítások (lásd alább) mind érvényben maradtak és a
+stressz-teszt is helyesnek találta őket (koncentrikus árnyékgyűrűk,
+forrásonként független állapot, hangerő-korlátozás, atomikus mentés stb.).
+
+------------------------------------------------------------------
+KORÁBBI (v6) JAVÍTÁSOK
+------------------------------------------------------------------
+
+JAVÍTOTT HIBÁK
+------------------------------------------------------------------
+1) "A lekerekítéseknél még mindig sötét folt/négyzet látszik."
+   A v5-ös kézzel rajzolt árnyék EGYMÁSRA (nem egymás mellé) rajzolt,
+   részben átfedő, félig átlátszó rétegekből állt - ez azt eredményezte,
+   hogy a kártya pereme közelében az átfedő rétegek összeadódó alfa-
+   értéke egy jól látható, kemény szélű, sötét "gyűrűt" rajzolt ki
+   (pont ez látszott a képen). MEGOLDÁS: az árnyék most koncentrikus,
+   EGYMÁST NEM ÁTFEDŐ gyűrűkből épül fel (mindegyik gyűrű csak egyszer,
+   a saját, önálló, alacsony alfa-értékével fest), így tényleg sima,
+   fokozatosan elhalványuló árnyékot ad, nem egy tömör karikát.
+
+2) "Az óra túl nagy és le van vágva alul."
+   Az info-kártya korábban túl alacsony volt (88px) ahhoz a betűmérethez
+   képest, amit az óra használt - a szöveg emiatt túlnyúlt a kártya
+   (és az újonnan bevezetett maszk) szélén, ezért vágódott le. Az óra
+   betűmérete csökkent, a kártya pedig magasabb lett, bőséges hellyel.
+
+3) "A forrásváltó (TV/Rádió) ne legyen átlátszó, legyen világoskék
+   háttéren, és az opciók egymás mellett legyenek, ne egymás alatt."
+   A menü most egy tömör, világoskék kártya, amin a források nagy,
+   egymás melletti "csempékként" jelennek meg (nem lista), bal-jobb
+   nyilakkal választhatók.
+
+4) "A csatornamenü kijelölése eltorzul görgetés után, majd újranyitáskor
+   furcsa helyen jelenik meg."
+   Ez a Qt beépített `QListWidget::item:selected` stílusának egy ismert
+   hibája volt: egyedi méretű sorokkal (fejléc vs. csatorna) és egyedi
+   item-widgetekkel kombinálva a beépített kijelölő téglalap görgetés
+   közben "elszakadhat" a valós sortól. MEGOLDÁS: a Qt beépített
+   kijelölés-rajzolását teljesen kikapcsoltam, és a kiemelést maga a
+   csatorna-sor widget rajzolja meg saját magának (mindig pontosan ott,
+   ahol ténylegesen van) - ez a hibaosztály strukturálisan megszűnik.
+
+5) "A menü és minden widget legyen szebb, modernebb, a betűtípus csúnya,
+   a háttér túl egyszerű - és legyen felkészítve arra, hogy idővel a
+   felhasználó több kinézet közül választhasson."
+   - Bővebb, modernebb betűtípus-lista (Inter / Poppins / Roboto / Noto
+     Sans / Ubuntu / ... - amelyik éppen elérhető a gépen).
+   - A kártyák finom színátmenetes szegélyt is kaptak a lapos szín
+     helyett, a kategória-fejlécek "chip" stílusú, halvány jelvényt
+     kaptak, a menü fejlécében pedig egy kis ikon-jelvény jelzi az
+     aktív forrást (TV/Rádió).
+   - ÚJ: a színvilág mostantól egy `THEMES` regiszterből jön (lásd
+     lejjebb). Jelenleg két teljes, kész téma van megadva ("Midnight
+     Blue" - az alapértelmezett, és "Aurora Amber" - egy meleg
+     alternatíva); az aktív témát az `ACTIVE_THEME_KEY` konstans
+     választja ki. Ez az architektúra van felkészítve arra, hogy a
+     jövőben egy beállítás-menüben a felhasználó válthasson köztük -
+     ehhez csak egy UI-t kell majd rákötni erre a már kész rendszerre.
