@@ -55,6 +55,7 @@ class PanelMixin:
             self.open_help()
 
     def open_help(self):
+        self._cancel_preview()
         if self.menu_visible:
             self.close_menu()
         if self.mode_menu_visible:
@@ -85,6 +86,7 @@ class PanelMixin:
             self.open_settings()
 
     def open_settings(self):
+        self._cancel_preview()
         if self.menu_visible:
             self.close_menu()
         if self.mode_menu_visible:
@@ -190,6 +192,7 @@ class PanelMixin:
         # (a VOLUME_BAR_STYLE a theme modulban él)
         theme.VOLUME_BAR_STYLE = _volume_bar_stylesheet()
         self.volume_bar.setStyleSheet(theme.VOLUME_BAR_STYLE)
+        self.preview_bar.setStyleSheet(theme.VOLUME_BAR_STYLE)
 
         self.info_card.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.menu_panel.set_colors(theme.THEME.MENU_BG, theme.THEME.MENU_BORDER)
@@ -197,6 +200,7 @@ class PanelMixin:
         self.settings_panel.set_colors(theme.THEME.MENU_BG, theme.THEME.MENU_BORDER)
         self.radio_visualizer.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.number_osd.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
+        self.preview_osd.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.volume_osd.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.loading_card.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.exit_confirm_card.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
@@ -217,7 +221,7 @@ class PanelMixin:
             self._refresh_menu_items()
 
         for widget in (self.info_card, self.menu_panel, self.mode_menu, self.settings_panel,
-                       self.radio_visualizer, self.number_osd, self.volume_osd,
+                       self.radio_visualizer, self.number_osd, self.preview_osd, self.volume_osd,
                        self.loading_card, self.exit_confirm_card, self.help_card):
             widget.update()
 
@@ -252,41 +256,93 @@ class PanelMixin:
         (lásd EXTERNAL_APPS), mert az teljesen elkerüli ezt a
         konfliktust azzal, hogy a két natív renderelő sosem osztozik
         egy ablakon."""
+        # JAVÍTVA: korábban minden hívás a JELENLEGI (esetleg már összezsugorított)
+        # geometriából indult, és azt "állította vissza" - egy csatornaváltáskor
+        # több hívás is történt, így a videófelület minden váltásnál 1-2 pixelt
+        # veszített, és sosem nyerte vissza. Most egyetlen, összevont "rúgás"
+        # fut, és mindig az ablak TÉNYLEGES méretére állít vissza.
+        # Csak akkor van értelme, ha egy beágyazott Chromium is él az ablakban.
+        if self.web_view is None or getattr(self, "_kick_pending", False):
+            return
         if not self.isVisible() or self.isMinimized():
             return
-        geo = self.video_frame.geometry()
-        if geo.width() < 2:
+        w, h = self.width(), self.height()
+        if w < 2:
             return
-        self.video_frame.resize(geo.width() - 1, geo.height())
-        QTimer.singleShot(0, lambda: self.video_frame.setGeometry(geo))
+        self._kick_pending = True
+        self.video_frame.setGeometry(0, 0, w - 1, h)
+        QTimer.singleShot(0, self._finish_video_kick)
+
+    def _finish_video_kick(self):
+        self._kick_pending = False
+        self.video_frame.setGeometry(0, 0, self.width(), self.height())
 
     def _show_widget(self, panel):
+        # Már teljesen látszik: nincs mit animálni (korábban minden hívás -
+        # pl. zapping közben az infókártyánál - újraindította a fade-et).
+        visible_now = panel.isVisible() and not getattr(panel, "_hiding", False)
+        panel._hiding = False
+        if visible_now and panel.opacity >= 0.99:
+            panel.raise_()
+            return
+        was_visible = panel.isVisible()
         panel.show()
         panel.raise_()
-        self._kick_video_repaint()
+        if not was_visible:
+            self._kick_video_repaint()
         if not self._animations_enabled():
+            self._stop_fade(panel)
             panel.opacity = 1.0
             panel.update()
             return
-        self._animate_opacity(panel, 0.0, 1.0, 190)
+        start = panel.opacity if was_visible else 0.0
+        self._animate_opacity(panel, start, 1.0, 190)
 
     def _hide_widget(self, panel):
-        if not panel.isVisible():
+        if not panel.isVisible() or getattr(panel, "_hiding", False):
             return
+        panel._hiding = True
         self._kick_video_repaint()
         if not self._animations_enabled():
+            self._stop_fade(panel)
+            self._finish_hide(panel)
+            return
+        self._animate_opacity(panel, panel.opacity, 0.0, 190,
+                              on_finished=lambda p=panel: self._finish_hide(p))
+
+    def _finish_hide(self, panel):
+        # Csak akkor rejtünk, ha közben nem kértük újra a megjelenítését.
+        if getattr(panel, "_hiding", False):
+            panel._hiding = False
             panel.opacity = 0.0
             panel.hide()
-            return
-        self._animate_opacity(panel, 1.0, 0.0, 190, on_finished=panel.hide)
+
+    def _stop_fade(self, panel):
+        anim = getattr(panel, "_fade_anim", None)
+        if anim is not None:
+            anim.stop()
 
     def _animate_opacity(self, panel, start, end, duration, on_finished=None):
-        anim = QPropertyAnimation(panel, b"opacity", self)
+        # JAVÍTVA: panelenként EGY újrahasznált animáció. Korábban egy
+        # félbehagyott "eltűnés" animáció a későbbi "megjelenés" UTÁN is
+        # lefutott, és elrejtette a frissen megjelent panelt (pl. hangerő-OSD
+        # vagy infókártya gyors egymásutáni hívásnál), a kiolvasott
+        # DeleteWhenStopped objektumra való hivatkozás pedig RuntimeError-t
+        # okozhatott.
+        anim = getattr(panel, "_fade_anim", None)
+        if anim is None:
+            anim = QPropertyAnimation(panel, b"opacity", panel)
+            anim.setEasingCurve(QEasingCurve.InOutQuad)
+            panel._fade_anim = anim
+        else:
+            anim.stop()
+            try:
+                anim.finished.disconnect()
+            except TypeError:
+                pass
         anim.setDuration(duration)
         anim.setStartValue(start)
         anim.setEndValue(end)
-        anim.setEasingCurve(QEasingCurve.InOutQuad)
         if on_finished:
             anim.finished.connect(on_finished)
-        anim.start(QPropertyAnimation.DeleteWhenStopped)
-        panel._fade_anim = anim  # referencia megtartása, amíg fut
+        anim.start()

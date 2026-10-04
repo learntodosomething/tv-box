@@ -3,6 +3,7 @@
 import os
 import shutil
 import sys
+from tvbox.compat import WEBENGINE_AVAILABLE
 
 
 # ===========================================================================
@@ -145,15 +146,22 @@ WEB_APPS = {
 }
 
 
-# Csak akkor jelenik meg "appon belüli" csempeként, ha a QtWebEngine
-# ténylegesen telepítve van - egyébként a lenti EXTERNAL_ORDER veszi át
-# a helyét (külön Brave-ablakos mód).
-# A beépített QtWebEngine és a libVLC natív videófelülete ugyanazon
-# top-level ablakban natív GPU-kompozitort használ. A felhasználó gépén ez
-# ismételt crash-t okozott, ezért a YouTube-ot stabilitás miatt KIZÁRÓLAG
-# külön Brave kiosk-ablakban futtatjuk. A VLC TV-kép útvonala ettől teljesen
-# érintetlen marad.
-WEB_APP_ORDER = []
+# A YouTube a program ablakán BELÜL fut (QtWebEngine), a nyilakkal/Enterrel
+# irányítható, Esc/B visszahoz a TV Box felületére - ahogy eddig is.
+#
+# KAPCSOLÓ:  YOUTUBE_EMBEDDED = True   -> beépített nézet (alap)
+#            YOUTUBE_EMBEDDED = False  -> külön Brave kiosk-ablak
+# Ha a QtWebEngine nincs telepítve, automatikusan a Brave-es mód lép életbe.
+#
+# FIGYELEM (ismert kockázat): a beépített QtWebEngine és a libVLC natív
+# videófelülete ugyanabban a top-level ablakban két külön natív GPU-kompozitort
+# használ; egyes gépeken ez összeomláshoz vezethet. Az ellenszerek: a Chromium
+# előmelegítése indulás után (lásd app.py), a VLC leállítása a webnézetre
+# váltáskor, és a videófelület újrarajzoltatása. Ha a gépeden mégis
+# összeomlik, állítsd False-ra.
+YOUTUBE_EMBEDDED = True
+
+WEB_APP_ORDER = ["youtube"] if (YOUTUBE_EMBEDDED and WEBENGINE_AVAILABLE) else []
 
 
 # Ebben a sorrendben jelennek meg a forrásváltóban a beépített (VLC-s)

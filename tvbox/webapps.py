@@ -3,7 +3,7 @@
 import subprocess
 from PyQt5.QtCore import (QEvent, QTimer, QUrl, Qt)
 from tvbox.compat import (QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestInterceptor, QWebEngineView, WEBENGINE_AVAILABLE, logger)
-from tvbox.external_apps import EXTERNAL_APPS, WEB_APPS, _resolve_app_command
+from tvbox.external_apps import EXTERNAL_APPS, WEB_APPS, WEB_APP_ORDER, _resolve_app_command
 from tvbox.youtube import YOUTUBE_ADBLOCK_JS, YouTubeAdBlockInterceptor, _prepare_webengine_storage_dir
 
 
@@ -21,7 +21,9 @@ class WebAppMixin:
         LUSTÁN, csak az első tényleges használatkor (nem induláskor), hogy
         ne lassítsa a program indulását és ne egyen memóriát, ha a
         felhasználó sosem nyitja meg a YouTube-ot."""
-        if not WEBENGINE_AVAILABLE:
+        # VÉDŐHÁLÓ: ha nincs beépített webalkalmazás engedélyezve, a Chromium-ot
+        # SOHA nem hozzuk létre (hidegindításkor natív access violation volt).
+        if not WEBENGINE_AVAILABLE or not WEB_APP_ORDER:
             self.web_view = None
             return
         try:
@@ -125,6 +127,12 @@ class WebAppMixin:
         app = WEB_APPS.get(key)
         if not app:
             return
+        # Ha ez az alkalmazás nem beépített módban van engedélyezve, a helyes
+        # út a külső (Brave) indítás - nem szabad Chromium-ot létrehozni.
+        if key not in WEB_APP_ORDER:
+            if key in EXTERNAL_APPS:
+                self._launch_external_app(key)
+            return
 
         if self.web_view is None and WEBENGINE_AVAILABLE:
             self._build_web_view()
@@ -175,11 +183,7 @@ class WebAppMixin:
         self._web_menu_shortcut.setEnabled(True)
 
     def _stop_playback_for_web_app(self):
-        try:
-            self.player.stop()
-        except Exception as e:
-            logger.warning("Nem sikerült leállítani a lejátszást webnézetre váltáskor: %s", e)
-        self.watchdog_timer.stop()
+        self._halt_playback()
         self.hide_timer.stop()
         self._hide_widget(self.info_card)
         self._hide_widget(self.radio_visualizer)
@@ -293,9 +297,19 @@ class WebAppMixin:
             )
             return
 
+        # Dupla indítás ellen (Enter-spam): ha már fut, nem indítunk újat.
+        running = self._external_processes.get(key)
+        if running is not None and running.poll() is None:
+            return
+
         try:
+            # JAVÍTVA: eddig a VLC a háttérben tovább játszott (hang + sávszél),
+            # amíg a Brave-ben nézték a YouTube-ot.
+            self._halt_playback()
+            self._hide_widget(self.loading_card)
             proc = subprocess.Popen(command + app["args"])
             self._external_processes[key] = proc
+            self.external_watch_timer.start(1000)
             self.showMinimized()
         except Exception as e:
             logger.warning("Nem sikerült elindítani a(z) %s alkalmazást: %s", key, e)
@@ -314,6 +328,8 @@ class WebAppMixin:
             del self._external_processes[key]
             logger.info("A külső alkalmazás (%s) bezárult - visszaállítom a TV Box-ot.", key)
             self._restore_after_external_app()
+        if not self._external_processes:
+            self.external_watch_timer.stop()
 
     def _restore_after_external_app(self):
         # A showNormal() -> showFullScreen() sorrend azért kell, mert egy
@@ -324,10 +340,14 @@ class WebAppMixin:
         self.raise_()
         self.activateWindow()
         self.setFocus()
+        # A kilépéskor leállított lejátszás folytatása a legutóbbi csatornán.
+        if self.current_key:
+            self.play_channel(self.current_key)
 
     def switch_mode(self, new_mode):
         if new_mode not in self.sources:
             return
+        self._cancel_preview()
         # Ha épp egy webnézet (pl. YouTube) volt aktív, ezt mindenképp el
         # kell hagyni - még akkor is, ha a "mögötte" lévő forrás (self.mode)
         # időközben nem változott, mert enélkül a webnézet a képernyőn

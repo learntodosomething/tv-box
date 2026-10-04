@@ -1,0 +1,100 @@
+v18 - stabilitás + pufferelés (statikus átvizsgálás alapján)
+=============================================================
+PUFFERELÉS
+ - network-caching: fix 1200 ms helyett csatornánként 2000 ms (TV) / 3000 ms (rádió),
+   elakadáskor automatikusan nő (TV: 2000>3500>6000>9000, rádió: 3000>5000>8000>12000),
+   az URL-enként megtanult szint mentődik (~/.tvbox_settings.json, "_stream_cache").
+ - Stall-őr: 12 mp-nél tovább tartó <100% pufferelés, vagy 18 mp-ig nem induló adás
+   => automatikus újracsatlakozás (1/2/4/8 mp várakozással, max 4 próba), utána hibakártya.
+ - EndReached (élő adás megszakadt) és Error esetén is automatikus újrapróbálás.
+ - A pufferelés-kártya csak 0,8 mp-nél hosszabb pufferelésnél jelenik meg (nem villog
+   minden szegmenshatárnál), a % felirat nem frissül minden eseményre.
+ - Csatornaváltás 150 ms-os késleltetéssel (debounce): nyomva tartott nyíl nem indít
+   30 lejátszást/mp-ben.
+STABILITÁS / HIBÁK
+ - _kick_video_repaint: a videófelület váltásonként 1-2 pixelt veszített (geometria
+   fokozatosan zsugorodott); most összevont, és mindig az ablak valós méretére áll vissza.
+ - Fade-animációk versenyhelyzete: egy félbehagyott "eltűnés" elrejthette az újra
+   megjelent panelt; panelenként egy újrahasznált animáció.
+ - Menü csúsztatás: gyors M-M után a menü láthatatlanul "nyitva" maradhatott.
+ - Külső alkalmazás (YouTube/Brave) indításakor a VLC tovább játszott; dupla indítás
+   ellen védelem; visszatéréskor a csatorna folytatódik.
+ - Egypéldányos védelem: összeomlás utáni "árva" szegmens miatt nem indult a program.
+ - app.py: a main() hívás az osztály ELŐTT volt (python app.py NameError-ral elszállt).
+ - VLC-példány: ismeretlen kapcsolónál None-t ad, nem kivételt; most lépcsőzetes
+   visszaesés + ellenőrzés. closeEvent: időzítők leállítása, player/instance release.
+ - Beépített QtWebEngine előmelegítés kikapcsolva, amíg WEB_APP_ORDER üres (RAM, indulás,
+   és nincs két natív kompozitor egy ablakban).
+TELJESÍTMÉNY
+ - GlassPanel: az árnyék/kitöltés előrenderelt pixmapből rajzolódik (eddig minden
+   újrafestésnél 6 QPainterPath-különbség); spinner 60 -> 30 fps.
+ - Menü fókusz-frissítés O(n) -> O(1); a menülista csak szükség esetén épül/frissül.
+ESZKÖZÖK
+ - tools/stream_probe.py: megméri, melyik adás lassabb a lejátszásnál (ez a pufferelés
+   valódi oka). tests/stress_test.py: véletlen billentyűvihar + libVLC-szerű szálas
+   események. tests/test_buffering.py, tests/test_probe_local.py: Qt nélkül futnak.
+
+v18.1 - a valódi VLC-s stressz-teszt (Windows) eredményei alapján
+==================================================================
+Mért tünet: az eseményhurok 4-13 mp-re befagyott, miközben a leglassabb billentyű-
+kezelés 72 ms volt => a fagyás NEM billentyű-kezelés közben, hanem egy időzítő-slotban
+történt (a késleltetett lejátszásindítás: instance.media_new + set_media + play).
+ - tvbox/vlcworker.py: minden blokkoló libVLC-hívás (set_media, play, stop, hangerő,
+   némítás) külön munkaszálon fut, "legutolsó kérés nyer" sorral. A GUI-szál soha nem vár
+   a VLC-re. Kilépéskor, ha a VLC beragadt, a felszabadítás kimarad (nincs exit-crash).
+ - Generáció-kapu: a régi adás késői Error/EndReached eseményei nem indítanak újrapróbát.
+ - Stressz-teszt: külső app (Brave) indítása letiltva; faulthandler -> tests/stress_log.txt
+   (natív összeomlásnál is Python-verem); GUI-fagyásnál minden szál vermét kiírja;
+   billentyű-napló (tests/stress_keys.txt); Windows-os memóriamérés; --no-chaos, --fake-block.
+
+v18.2 - a stress_log.txt alapján: natív összeomlás a Chromium indításakor
+=========================================================================
+Napló: access violation, webapps.py:_build_web_view <- _show_web_app <- menus.py (lambda).
+OK: a forrásváltó azt nézte, hogy a csempe kulcsa benne van-e a WEB_APPS szótárban
+(a "youtube" mindig benne van), nem azt, hogy melyik listából épült a csempe. Így a
+YouTube csempe Enterre a beépített Chromiumot indította, nem a Brave-et, bár a
+WEB_APP_ORDER üres (= beépített mód kikapcsolva). Az eredeti kódban az előmelegítés
+(prewarm) eltakarta; v18-ban kikapcsoltam, ezért a hideg indítás elszállt.
+ - menus.py: az útvonalat a WEB_APP_ORDER tagság dönti el.
+ - webapps.py: _show_web_app kikapcsolt módban a külső indítóra irányít; a
+   _build_web_view kikapcsolt módban SOHA nem hoz létre QWebEngineView-t.
+ - tests/test_routing.py: mindkét konfigurációra (be/ki) ellenőrzi az útvonalat.
+ - stress_test.py: --allow-web nélkül a webnézet indítása is letiltva.
+VÁLTOZÁS A VISELKEDÉSBEN: a YouTube csempe mostantól a Brave-et indítja (ahogy az
+external_apps.py megjegyzései leírják). Beépített YouTube-hoz: WEB_APP_ORDER = ["youtube"].
+
+v18.3 - Python 3.13: minden lejátszás TypeError-ral bukott (saját hiba v18.1-ben)
+=================================================================================
+Napló: TypeError("'_thread._ThreadHandle' object is not callable"), az újrapróbák
+1/2/4/8 mp-es ütemben. OK: a VlcWorker a threading.Thread leszármazottja volt, és a saját
+`_handle()` metódusát a Python 3.13 Thread._handle attribútuma (_ThreadHandle) eltakarta.
+ - VlcWorker: kompozíció az öröklés helyett (nem ütközhet a Thread belső neveivel).
+ - A tesztek 3.12-n futottak, ahol nincs Thread._handle, ezért nem fogták meg; új
+   regressziós teszt: test_no_name_collision_with_thread.
+
+v18.4 - TV-szerű csatornaváltás (előnézet + késleltetett váltás)
+================================================================
+ - ← / → már NEM vált azonnal: a jobb felső sarokban megjelenik, mire fog váltani
+   (csatornaszám, név, lefutó időcsík), a jelenlegi adás közben tovább megy. Több nyíl
+   egymás után továbblépteti az előnézetet.
+ - A váltás az utolsó nyomás után a beállított idő (alap: 3 mp) múlva történik; Enter:
+   azonnal vált; Esc: elveti az előnézetet (nem kilépés). Ha visszalépsz az éppen játszó
+   csatornára, nem indul újra az adás.
+ - Az idő a meglévő "Váltás türelmi ideje" beállításból jön (2/3/5 mp; korábbi neve:
+   Számbeírás türelmi ideje) - nem kellett új sor a Beállítások panelbe.
+ - Enter a félig beírt csatornaszámot is azonnal megerősíti.
+ - M / B / S / H megnyitásakor, forrásváltáskor és külső app indításakor az előnézet
+   elvetődik. A számjegy-beírás és az előnézet nem futhat egyszerre.
+ - tests/test_preview.py (állapotgép), a stressz-teszt új invariánsai.
+
+v18.5 - a beépített YouTube visszaállítva (alapértelmezett)
+===========================================================
+A v18.2 a YouTube csempét a Brave-es módra irányította (az external_apps.py megjegyzései
+szerint), de addig a gyakorlatban a beépített nézet nyílt meg. Visszaállítva:
+ - external_apps.py: YOUTUBE_EMBEDDED = True (egy soros kapcsoló). Ha a QtWebEngine nincs
+   telepítve, automatikusan a Brave-es mód lép életbe.
+ - Ezzel visszakapcsol: a Chromium előmelegítése indulás után, a videófelület-"rúgás"
+   (javított, nem zsugorít), a GL-kontextus megosztás.
+ - tests/test_routing.py: az ALAPÉRTELMEZETT konfiguráció beépített YouTube-ot ad; QtWebEngine
+   hiányában Brave-re esik vissza.
+ - Stressz-teszt: a webnézet alapból továbbra is ki van hagyva; külön: --allow-web.

@@ -2,7 +2,7 @@
 """A főablak elemeinek felépítése (kártyák, menük, OSD-k)."""
 from PyQt5.QtWidgets import (QAbstractItemView, QHBoxLayout, QListWidget, QListWidgetItem, QProgressBar, QVBoxLayout, QWidget)
 from PyQt5.QtGui import QColor, QFont
-from PyQt5.QtCore import QSize, Qt
+from PyQt5.QtCore import QPropertyAnimation, QSize, Qt
 from tvbox.config import SETTINGS_SCHEMA
 from tvbox.external_apps import (EXTERNAL_APPS, EXTERNAL_ORDER, WEB_APPS, WEB_APP_ORDER)
 from tvbox.theme import (MENU_STYLE, _font, _label, set_translucent)
@@ -374,6 +374,49 @@ class UIBuildMixin:
         panel.hide()
         self.number_osd = panel
 
+    def _build_preview_osd(self):
+        """Jobb felső sarok: 'erre fogsz váltani' kártya + lefutó időcsík.
+        A nyilak csak ezt állítják; a tényleges váltás a várakozás után (vagy
+        Enterre) történik, közben a jelenlegi adás tovább megy."""
+        panel = GlassPanel(self.central, radius=22, margin=16, glass=True)
+        layout = panel.contentLayout()
+        layout.setSpacing(8)
+
+        row = QHBoxLayout()
+        row.setSpacing(14)
+        self.preview_badge = TintedLabel(
+            "1", bg_color=QColor(theme.THEME.ACCENT), text_color=QColor("#000000"),
+            font=_font(19, QFont.Bold), fixed_size=(56, 56),
+        )
+        row.addWidget(self.preview_badge)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        text_col.setAlignment(Qt.AlignVCenter)
+        self.preview_caption = _label("Váltás erre  ·  Enter: most", size=10, weight=QFont.Medium,
+                                      color=theme.THEME.TEXT_DIM)
+        self.preview_name = _label("", size=16, weight=QFont.DemiBold, color="#FFFFFF")
+        text_col.addWidget(self.preview_caption)
+        text_col.addWidget(self.preview_name)
+        row.addLayout(text_col, 1)
+        layout.addLayout(row)
+
+        self.preview_bar = QProgressBar()
+        set_translucent(self.preview_bar)
+        self.preview_bar.setRange(0, 100)
+        self.preview_bar.setValue(100)
+        self.preview_bar.setTextVisible(False)
+        self.preview_bar.setFixedHeight(6)
+        self.preview_bar.setStyleSheet(theme.VOLUME_BAR_STYLE)
+        layout.addWidget(self.preview_bar)
+
+        # Az időcsík csak kozmetika (a váltást a preview_timer végzi).
+        self._preview_anim = QPropertyAnimation(self.preview_bar, b"value", self)
+
+        panel.setFixedSize(360, 112)
+        panel.hide()
+        self.preview_osd = panel
+
     def _build_volume_osd(self):
         panel = GlassPanel(self.central, radius=20, margin=14, glass=True)
         layout = panel.contentLayout()
@@ -484,10 +527,10 @@ class UIBuildMixin:
         layout.addWidget(divider)
 
         shortcuts = [
-            ("← / →", "Előző / következő csatorna"),
+            ("← / →", "Csatorna-előnézet (idő után vált)"),
             ("↑ / ↓", "Hangerő fel / le"),
             ("0-9", "Csatornaszám beírása"),
-            ("Enter", "Kiválasztás / megerősítés"),
+            ("Enter", "Váltás azonnal / megerősítés"),
             ("Space / V", "Némítás"),
             ("Backspace", "Ugrás az előző csatornára"),
             ("M", "Csatornalista meg-/bezárása"),

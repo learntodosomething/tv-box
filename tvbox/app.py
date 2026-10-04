@@ -8,7 +8,8 @@ from PyQt5.QtCore import (QSharedMemory, QTimer, QUrl, Qt)
 from datetime import datetime
 from tvbox.channels import SOURCES, _build_source_state
 from tvbox.compat import WEBENGINE_AVAILABLE, logger
-from tvbox.config import SETTINGS_SCHEMA, load_settings, save_settings
+from tvbox.config import SETTINGS_SCHEMA, load_settings, save_settings, VLC_BASE_ARGS, VLC_OPTIONAL_ARGS
+from tvbox.external_apps import WEB_APP_ORDER
 from tvbox.player import PlayerSignals
 from tvbox.theme import (FONT_FALLBACKS, HU_MONTHS, HU_WEEKDAYS, _set_active_theme)
 from tvbox.ui_build import UIBuildMixin
@@ -17,6 +18,13 @@ from tvbox.menus import MenuMixin
 from tvbox.webapps import WebAppMixin
 from tvbox.panels import PanelMixin
 from tvbox.input import InputMixin
+
+
+# A beépített (QtWebEngine) YouTube jelenleg ki van kapcsolva (WEB_APP_ORDER
+# üres), a YouTube külön Brave-ablakban fut. Ilyenkor a Chromium-t sem
+# előmelegítjük, és a GL-kontextus megosztást sem kapcsoljuk be: kevesebb
+# RAM, gyorsabb indulás, és nincs két natív kompozitor egy ablakban.
+EMBEDDED_WEB_ENABLED = bool(WEBENGINE_AVAILABLE and WEB_APP_ORDER)
 
 
 def main():
@@ -28,7 +36,7 @@ def main():
     # hogy YouTube-ról visszaváltva néha nem jelent meg a kép a TV-n, és
     # valószínűleg hozzájárult a beágyazott böngésző ismételt megnyitásakor
     # tapasztalt összeomláshoz is.
-    if WEBENGINE_AVAILABLE:
+    if EMBEDDED_WEB_ENABLED:
         QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 
     app = QApplication(sys.argv)
@@ -41,6 +49,12 @@ def main():
     # lokális, azonnal eldobott változó) - amíg `app.exec_()` fut, ez a
     # `main()` hívási keret nem szűnik meg, tehát a hivatkozás megmarad.
     shared_mem = QSharedMemory("HU.TVBox.SingleInstanceLock.v1")
+    # JAVÍTVA: Linuxon egy összeomlás után a szegmens "árván" megmarad, és a
+    # következő indítás hibásan azt hitte, hogy a program már fut. Ha senki
+    # nem használja, az attach+detach törli; ha tényleg fut egy példány,
+    # a create() ettől még helyesen elbukik.
+    if shared_mem.attach():
+        shared_mem.detach()
     if not shared_mem.create(1):
         logger.warning("A TV Box már fut egy másik példányban - kilépés.")
         sys.exit(0)
@@ -52,10 +66,6 @@ def main():
 
     window = TVBox()
     sys.exit(app.exec_())
-
-
-if __name__ == "__main__":
-    main()
 
 
 class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, InputMixin, QMainWindow):
@@ -110,6 +120,9 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
             if value not in spec["options"]:
                 value = spec["default"]
             self.settings_data[spec["key"]] = value
+        learned = saved_settings_block.get("_stream_cache")
+        if isinstance(learned, dict):
+            self.settings_data["_stream_cache"] = learned
 
         # A mentett témát MÁR ITT, a UI felépítése ELŐTT aktiváljuk, hogy
         # minden widget rögtön a helyes színekkel épüljön fel (ne kelljen
@@ -161,6 +174,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         self._build_settings_panel()
         self._build_radio_visualizer()
         self._build_number_osd()
+        self._build_preview_osd()
         self._build_volume_osd()
         self._build_loading_card()
         self._build_error_card()
@@ -182,12 +196,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         # soha, és a töltés-jelző örökre "beragadt". A callbackek bekötése
         # önmagában nem igényli, hogy az ablak már látható legyen, ezért ezt
         # biztonságos itt, a konstruktorban elvégezni.
-        vlc_args = ["--quiet", "--no-video-title-show", "--network-caching=1200"]
-        try:
-            self.instance = vlc.Instance(vlc_args)
-        except Exception as e:
-            logger.warning("Nem sikerült a megadott VLC beállításokkal indítani, alapértelmezettel próbálkozom: %s", e)
-            self.instance = vlc.Instance()
+        self.instance = self._create_vlc_instance()
         self.player = self.instance.media_player_new()
 
         # A libVLC event_attach callbackjei NEM a Qt GUI-szálon futnak -
@@ -196,6 +205,8 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         self.player_signals.playing.connect(self._on_stream_playing)
         self.player_signals.error.connect(self._on_stream_error)
         self.player_signals.buffering.connect(self._on_stream_buffering)
+        self.player_signals.ended.connect(self._on_stream_ended)
+        self._init_playback_helpers()
 
         try:
             em = self.player.event_manager()
@@ -206,6 +217,10 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
             em.event_attach(
                 vlc.EventType.MediaPlayerEncounteredError,
                 lambda e: self.player_signals.error.emit()
+            )
+            em.event_attach(
+                vlc.EventType.MediaPlayerEndReached,
+                lambda e: self.player_signals.ended.emit()
             )
             em.event_attach(
                 vlc.EventType.MediaPlayerBuffering,
@@ -264,7 +279,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         # ugyanúgy, ahogy TV/Rádió váltásnál is azonnal átvált a kép.
         self.external_watch_timer = QTimer(self)
         self.external_watch_timer.timeout.connect(self._check_external_processes)
-        self.external_watch_timer.start(1000)
+        # Csak külső alkalmazás indításakor fut (lásd _launch_external_app).
 
         # A beépített böngésző-nézet (pl. YouTube) SAJÁT KEZELÉST kap a
         # billentyűzeten: amíg fókuszban van, a normál keyPressEvent nem
@@ -303,8 +318,26 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         # Nem mutatjuk meg és nem töltjük be a YouTube-ot, így a VLC-képhez
         # nem nyúlunk hozzá. A későbbi YouTube-nyitáskor már nem kell
         # QWebEngineView-t létrehozni.
-        if WEBENGINE_AVAILABLE:
+        if EMBEDDED_WEB_ENABLED:
             QTimer.singleShot(1800, self._prewarm_web_engine)
+
+    def _create_vlc_instance(self):
+        """VLC-példány létrehozása lépcsőzetes visszaeséssel. Ismeretlen
+        kapcsolónál a libvlc_new() NULL-t ad (python-vlc: None), ezért nem
+        elég a try/except - az eredményt is ellenőrizzük."""
+        attempts = [VLC_BASE_ARGS + VLC_OPTIONAL_ARGS, VLC_BASE_ARGS, []]
+        for args in attempts:
+            try:
+                inst = vlc.Instance(args) if args else vlc.Instance()
+            except Exception as e:
+                logger.warning("VLC indítás sikertelen (%s): %s", args, e)
+                continue
+            if inst is not None:
+                if args != attempts[0]:
+                    logger.warning("VLC a szűkített kapcsolókkal indult: %s", args)
+                return inst
+        raise RuntimeError("A libVLC nem indítható - ellenőrizd a VLC telepítését "
+                           "(a python-vlc és a VLC bitszámának egyeznie kell).")
 
     def _prewarm_web_engine(self):
         """V26: a QtWebEngine első inicializálását ne az Enter esemény közben
@@ -399,11 +432,30 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
                 pass
         self.active_web_app = None
 
+        for name in ("play_debounce_timer", "stall_timer", "retry_timer",
+                     "buffer_card_timer", "watchdog_timer", "external_watch_timer"):
+            try:
+                getattr(self, name).stop()
+            except Exception:
+                pass
+
         self._write_settings()
+        # A leállítást és a felszabadítást a munkaszál végzi/előzi meg. Ha egy
+        # VLC-hívás épp beragadt (nem válaszoló szerver), NEM szabadítunk fel
+        # semmit alatta - a folyamat kilépésével úgyis megszűnik, és így nincs
+        # összeomlás a kilépéskor.
         try:
-            self.player.stop()
+            stopped = self.worker.close(timeout=4.0)
         except Exception:
-            pass
+            stopped = False
+        if stopped:
+            try:
+                self.player.release()
+                self.instance.release()
+            except Exception:
+                pass
+        else:
+            logger.warning("A VLC munkaszál nem állt le időben - felszabadítás kihagyva.")
 
         super().closeEvent(event)
 
@@ -439,6 +491,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         self.number_osd.move((w - nw) // 2, h - nh - 50)
 
         self.volume_osd.move((w - self.volume_osd.width()) // 2, 40)
+        self.preview_osd.move(w - self.preview_osd.width() - 28, 28)
 
         lw, lh = self.loading_card.width(), self.loading_card.height()
         self.loading_card.move((w - lw) // 2, (h - lh) // 2)
@@ -453,3 +506,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         self.help_card.move((w - hcw) // 2, (h - hch) // 2)
 
         super().resizeEvent(event)
+
+
+if __name__ == "__main__":
+    main()

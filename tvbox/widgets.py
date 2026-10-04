@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Saját Qt widgetek (panelek, csempék, listaelemek, animációk)."""
-from PyQt5.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QRegion)
+from PyQt5.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRegion)
 from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QVBoxLayout, QWidget)
 from PyQt5.QtCore import (QRectF, QSize, QTimer, Qt, pyqtProperty, pyqtSignal)
 from tvbox.theme import _font, _label, set_translucent
@@ -32,6 +32,8 @@ class GlassPanel(QWidget):
         self._margin = margin
         self._glass = glass
         self._opacity = 1.0
+        self._cache = None       # előrenderelt háttér (árnyék+kitöltés+keret)
+        self._cache_key = None
 
         self._content = QVBoxLayout(self)
         self._content.setContentsMargins(margin, margin, margin, margin + 4)
@@ -105,9 +107,26 @@ class GlassPanel(QWidget):
 
     # -- rajzolás --
     def paintEvent(self, event):
+        # TELJESÍTMÉNY: az árnyék 6 gyűrűje QPainterPath-különbségekből áll,
+        # ami drága; korábban ez MINDEN újrafestésnél lefutott (pl. a
+        # forgó spinner 60 fps-nél a töltés-kártyán). Most csak méret-,
+        # szín- vagy DPR-változáskor renderelünk, egyébként egy pixmap-másolás.
+        dpr = self.devicePixelRatioF()
+        key = (self.width(), self.height(), self._bg.rgba(), self._border.rgba(),
+               self._glass, self._shadow, dpr)
+        if self._cache is None or self._cache_key != key:
+            self._cache = self._render_cache(dpr)
+            self._cache_key = key
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setOpacity(self._opacity)
+        painter.drawPixmap(0, 0, self._cache)
+
+    def _render_cache(self, dpr):
+        pm = QPixmap(max(1, int(self.width() * dpr)), max(1, int(self.height() * dpr)))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.Antialiasing, True)
 
         rect = self._card_rect()
 
@@ -142,6 +161,9 @@ class GlassPanel(QWidget):
 
         if self._glass:
             self._paint_glass_sheen(painter, rect)
+
+        painter.end()
+        return pm
 
     def _paint_soft_shadow(self, painter, rect):
         """Koncentrikus, EGYMÁST NEM ÁTFEDŐ gyűrűk - mindegyik pixel pontosan
@@ -251,11 +273,11 @@ class SpinnerWidget(QWidget):
         self._timer.timeout.connect(self._rotate)
 
     def _rotate(self):
-        self._angle = (self._angle + 6) % 360
+        self._angle = (self._angle + 12) % 360
         self.update()
 
     def showEvent(self, event):
-        self._timer.start(16)
+        self._timer.start(33)  # 30 fps elég egy spinnerhez; 60 fps feleslegesen terhelte a GUI-t
         super().showEvent(event)
 
     def hideEvent(self, event):

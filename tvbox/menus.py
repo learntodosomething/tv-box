@@ -2,7 +2,7 @@
 """Csatornamenü és forrásváltó menü kezelése."""
 from PyQt5.QtWidgets import QAbstractItemView
 from PyQt5.QtCore import (QEasingCurve, QPropertyAnimation, QRect, QTimer, Qt)
-from tvbox.external_apps import EXTERNAL_APPS, WEB_APPS
+from tvbox.external_apps import EXTERNAL_APPS, WEB_APP_ORDER
 from tvbox.widgets import ChannelItemWidget
 
 
@@ -20,11 +20,22 @@ class MenuMixin:
         """A billentyűzet-fókuszt MINDIG a ténylegesen ott lévő sor-widgeten
         állítjuk be közvetlenül - sosem egy külön, esetleg elcsúszó
         kijelölő-téglalapon keresztül (lásd a 4. pontot a fájl elején)."""
-        for i in range(self.menu.count()):
-            item = self.menu.item(i)
-            widget = self.menu.itemWidget(item)
-            if isinstance(widget, ChannelItemWidget):
-                widget.set_focused(i == row)
+        # O(1): csak a régi és az új sort frissítjük (korábban minden sort).
+        listw = self.menu
+        if listw is None:
+            return
+        prev = getattr(self, "_focused_row_widget", None)
+        if prev is not None:
+            try:
+                prev.set_focused(False)
+            except RuntimeError:  # a widget közben megsemmisült (témaváltás)
+                pass
+        self._focused_row_widget = None
+        item = listw.item(row) if row >= 0 else None
+        widget = listw.itemWidget(item) if item is not None else None
+        if isinstance(widget, ChannelItemWidget):
+            widget.set_focused(True)
+            self._focused_row_widget = widget
 
     def _refresh_menu_items(self):
         self._ensure_menu_built(self.mode)
@@ -56,7 +67,26 @@ class MenuMixin:
         if item:
             listw.scrollToItem(item, QAbstractItemView.PositionAtCenter)
 
+    def _stop_menu_slide(self):
+        anim = getattr(self, "_menu_slide_anim", None)
+        self._menu_slide_anim = None
+        if anim is not None:
+            try:
+                anim.stop()
+            except RuntimeError:  # DeleteWhenStopped már törölte
+                pass
+
+    def _finish_close_menu(self):
+        # JAVÍTVA: gyors M-M (vagy csatornaváltás + M) esetén a régi "bezárás"
+        # animáció vége elrejtette a közben újranyitott menüt, így a menü
+        # "nyitott" állapotú maradt láthatatlanul, és elnyelte a billentyűket.
+        self._menu_slide_anim = None
+        if not self.menu_visible:
+            self.menu_panel.hide()
+
     def open_menu(self):
+        self._cancel_preview()
+        self._stop_menu_slide()
         if self.mode_menu_visible:
             self.close_mode_menu()
         if self.settings_visible:
@@ -94,6 +124,7 @@ class MenuMixin:
         self.reset_menu_timer()
 
     def close_menu(self):
+        self._stop_menu_slide()
         if not self.menu_visible:
             self.menu_panel.hide()
             return
@@ -114,7 +145,7 @@ class MenuMixin:
             anim.setStartValue(start_rect)
             anim.setEndValue(end_rect)
             anim.setEasingCurve(QEasingCurve.InCubic)
-            anim.finished.connect(self.menu_panel.hide)
+            anim.finished.connect(self._finish_close_menu)
             anim.start(QPropertyAnimation.DeleteWhenStopped)
             self._menu_slide_anim = anim
 
@@ -158,16 +189,22 @@ class MenuMixin:
     def _switch_relative(self, direction):
         if not self.channel_keys:
             return
-        idx = self.channel_keys.index(self.current_key)
-        new_idx = (idx + direction) % len(self.channel_keys)
-        self.play_channel(self.channel_keys[new_idx])
+        # TV-szerű működés: a nyíl csak az ELŐNÉZETET lépteti (több lenyomás
+        # egymás után továbblép), a tényleges váltás a várakozás után vagy
+        # Enterre történik. Közben a jelenlegi adás tovább megy.
+        base = self._preview_key if self._preview_key in self.channel_keys else self.current_key
+        if base in self.channel_keys:
+            new_idx = (self.channel_keys.index(base) + direction) % len(self.channel_keys)
+        else:
+            new_idx = 0
+        self._show_channel_preview(self.channel_keys[new_idx])
 
     # ------------------------------------------------------------------
     # Forrásváltó menü ("B" billentyű: TV / Rádió / YouTube / Beállítások)
     # ------------------------------------------------------------------
     def _on_mode_tile_clicked(self, mode_key):
         self.close_mode_menu()
-        if mode_key in WEB_APPS:
+        if mode_key in WEB_APP_ORDER:
             # A QtWebEngine indítását leválasztjuk a kattintási eseményről is.
             QTimer.singleShot(150, lambda k=mode_key: self._show_web_app(k))
         elif mode_key in EXTERNAL_APPS:
@@ -186,6 +223,7 @@ class MenuMixin:
         self.settings_button.set_selected(self._mode_cursor == n)
 
     def open_mode_menu(self):
+        self._cancel_preview()
         if self.menu_visible:
             self.close_menu()
         if self.settings_visible:
@@ -258,7 +296,7 @@ class MenuMixin:
         elif self.mode_tiles:
             tile = self.mode_tiles[self._mode_cursor]
             self.close_mode_menu()
-            if tile.mode_key in WEB_APPS:
+            if tile.mode_key in WEB_APP_ORDER:
                 # A natív VLC felület és a QtWebEngine ugyanazon top-level
                 # ablakban időzítésérzékeny lehet. Enter eseményből ne
                 # közvetlenül indítsuk a Chromium nézetet.

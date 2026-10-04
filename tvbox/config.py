@@ -76,7 +76,7 @@ SETTINGS_SCHEMA = [
         "options": [True, False], "labels": ["Be", "Ki"], "default": True,
     },
     {
-        "key": "digit_timeout_ms", "label": "Számbeírás türelmi ideje", "kind": "choice",
+        "key": "digit_timeout_ms", "label": "Váltás türelmi ideje", "kind": "choice",
         "options": [2000, 3000, 5000],
         "labels": ["2 mp", "3 mp", "5 mp"], "default": 3000,
     },
@@ -99,3 +99,18 @@ SETTINGS_SCHEMA = [
 # beállítás a kártyán megjelenik, de csendben hatástalan marad (naplózott
 # figyelmeztetéssel), nem okoz hibát.
 BACKLIGHT_GLOB = "/sys/class/backlight/*/"
+
+
+# ===========================================================================
+# VLC hangolás (pufferelés / stabilitás)
+#
+# VLC_BASE_ARGS: biztosan létező kapcsolók. VLC_OPTIONAL_ARGS: ha a telepített
+# VLC valamelyiket nem ismeri, az app automatikusan nélkülük indul újra.
+# A csatornánkénti puffer (network/live-caching) NEM itt, hanem lejátszáskor,
+# a StreamSupervisor szerint kerül a médiára (lásd tvbox/buffering.py).
+# ===========================================================================
+VLC_BASE_ARGS = [
+    "--quiet", "--no-video-title-show", "--no-osd",
+    "--no-snapshot-preview", "--no-sub-autodetect-file",
+]
+VLC_OPTIONAL_ARGS = ["--no-stats", "--http-reconnect"]

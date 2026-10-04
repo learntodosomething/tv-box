@@ -115,6 +115,14 @@ class InputMixin:
             return
 
         # Menük zárva - normál üzemmód
+        if key_code in (Qt.Key_Return, Qt.Key_Enter):
+            if self._preview_key is not None:      # "OK": azonnali váltás az előnézetre
+                self._confirm_preview()
+                return
+            if self.channel_buffer:                # beírt csatornaszám azonnali megerősítése
+                self._confirm_digit_buffer()
+                return
+
         if self.error_card.isVisible() and key_code in (Qt.Key_Return, Qt.Key_Enter):
             self._retry_current_channel()
             return
@@ -135,5 +143,7 @@ class InputMixin:
             self._toggle_mute()
         elif key_code == Qt.Key_Backspace:
             self._play_previous()
+        elif key_code == Qt.Key_Escape and self._preview_key is not None:
+            self._cancel_preview()                 # Esc: előnézet elvetése, nem kilépés
         elif key_code == Qt.Key_Escape or text.lower() == "q":
             self._handle_exit_request()
