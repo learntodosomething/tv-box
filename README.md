@@ -4,7 +4,7 @@ Modern desktop IPTV and radio player with Hungarian & Slovak channel support, bu
 
 Built with **Python + PyQt5 + VLC**.
 
-Version: **1.1.0b1** (v18 – stability, buffering and TV-style channel switching on top of the modular rewrite of the original single-file v17)
+Version: **1.2.0b1** (v19 – phone remote control with QR code, on top of the v18 stability, buffering and TV-style switching work and the modular rewrite of the original single-file v17)
 
 ## Contents
 
@@ -16,13 +16,14 @@ Version: **1.1.0b1** (v18 – stability, buffering and TV-style channel switchin
 6. [TV-style channel switching](#tv-style-channel-switching)
 7. [Playback reliability and buffering](#playback-reliability-and-buffering)
 8. [YouTube](#youtube)
-9. [Project structure](#project-structure)
-10. [Adding channels](#adding-channels)
-11. [Themes](#themes)
-12. [Diagnostics and testing](#diagnostics-and-testing)
-13. [Troubleshooting](#troubleshooting)
-14. [Limitations](#limitations)
-15. [Roadmap](#roadmap)
+9. [Phone remote](#phone-remote)
+10. [Project structure](#project-structure)
+11. [Adding channels](#adding-channels)
+12. [Themes](#themes)
+13. [Diagnostics and testing](#diagnostics-and-testing)
+14. [Troubleshooting](#troubleshooting)
+15. [Limitations](#limitations)
+16. [Roadmap](#roadmap)
 
 ## Features
 
@@ -40,6 +41,11 @@ Version: **1.1.0b1** (v18 – stability, buffering and TV-style channel switchin
 - Arrow keys *preview* the next channel in a corner card while the current channel keeps playing
 - The switch happens after a short wait (3 s by default) or instantly on Enter
 - Typing a channel number works as on a real remote
+
+**Phone remote**
+- Scan a QR code on the TV and control the box from your phone's browser – no app to install
+- D-pad, volume, channel list with search, number pad, and switching between TV / Radio / YouTube
+- YouTube search typed on the phone (see [Phone remote](#phone-remote))
 
 **Reliable playback**
 - Adaptive buffering: a stream that stalls is reconnected automatically with a larger buffer, and the app remembers which streams need one
@@ -110,6 +116,7 @@ Only one instance can run at a time.
 | `M` | Channel list |
 | `B` | Source menu (TV / Radio / YouTube / Settings) |
 | `S` | Settings |
+| `R` | Phone remote: show the QR code |
 | `H` or `?` | Key help (any key closes it) |
 | `Q` | Quit (asks for confirmation, if enabled) |
 
@@ -136,6 +143,7 @@ Open with `S` or from the source menu. Changes apply immediately and are saved t
 | Animations | On / Off | On |
 | Switch patience | 2 s / 3 s / 5 s | 3 s |
 | Info card duration | 3 s / 5 s / 8 s / Always visible | 5 s |
+| Phone remote | On / Off (turning it on shows the QR code) | Off |
 | YouTube ad blocker | On / Off (experimental, can cause a dark screen before ads) | Off |
 
 *Switch patience* is how long the app waits before switching to a previewed channel, and also how long it waits for the next digit of a typed number.
@@ -181,6 +189,40 @@ If QtWebEngine is not installed, the app automatically falls back to the Brave m
 
 > **Known risk:** the embedded Chromium and VLC's native video surface share one window and each use their own GPU compositor. On some machines this can cause crashes. tv-box mitigates it (the web view is pre-warmed shortly after start-up, VLC is stopped before the web view is shown, the video surface is repainted after overlays). If YouTube crashes on your machine, set `YOUTUBE_EMBEDDED = False`.
 
+## Phone remote
+
+Control tv-box from your phone's browser – nothing to install on the phone.
+
+**Set up**
+
+1. On the TV Box open **Settings → Phone remote → On** (or press `R` once it is enabled). A QR code appears.
+2. Scan it with your phone camera. The phone must be on the **same Wi-Fi / network** as the TV Box.
+3. The remote page opens and the QR code closes by itself. Add the page to your home screen if you like.
+
+On Windows the first start triggers a firewall prompt – allow Python on *private* networks. The prompt can hide behind the full-screen window; if the phone cannot load the page, run `tools/remote_firewall_windows.bat` (as administrator) instead, and see [Troubleshooting](#troubleshooting).
+
+**What the remote can do**
+
+| Tab | Features |
+|---|---|
+| Remote | D-pad and OK, Back, Close, channel list / source menu / settings, volume and mute (hold to repeat), CH ▲/▼ (uses the same preview as the arrow keys), number pad |
+| Channels | The full TV and radio list with a search box; tap a channel to play it |
+| YouTube | Search box: type a query (or paste a YouTube link), and the result opens on the TV |
+| Top bar | Now playing, status (buffering / error), pending channel preview, and one-tap switching between **TV**, **Radio** and **YouTube** |
+
+Inside YouTube the D-pad buttons are forwarded to YouTube itself, the volume buttons change the video volume, and *Close* returns to TV / Radio. The remote never quits the program – `Esc` from the phone only closes menus, panels and previews.
+
+**YouTube search** works in the embedded mode (`YOUTUBE_EMBEDDED = True`). The search link format of YouTube's TV interface is not documented, so the templates are constants at the top of `tvbox/remote.py` (`YOUTUBE_SEARCH_URL`, `YOUTUBE_WATCH_URL`). If a search does not land on the results page, change `YOUTUBE_SEARCH_URL` to `https://www.youtube.com/results?search_query={q}` (or another format) – no other change is needed. Typing on the phone also avoids a limitation of the physical keyboard: while YouTube is open, tv-box reserves `B`, `S`, `H` and `M` for its own shortcuts.
+
+**Security**
+
+- The server listens only while *Phone remote* is on (default: off) and uses the first free port from 8765 up.
+- Every request needs a secret token, which is part of the QR code and stored in `~/.tvbox_settings.json`. Press `N` on the QR screen to generate a new token and lock out every phone that scanned the old one.
+- Wrong tokens are rate-limited (10 attempts per minute per address), commands are whitelisted and validated, and request bodies are limited to 2 KB.
+- The connection is plain HTTP on your local network, so use it on a network you trust. Do not forward the port to the internet.
+
+The QR code is generated by the built-in encoder `tvbox/qrcode_min.py`, so no extra package is needed.
+
 ## Project structure
 
 ```
@@ -203,9 +245,17 @@ tv-box/
 │   ├── youtube.py         # YouTube ad blocking helpers
 │   ├── external_apps.py   # Embedded/external app definitions, YOUTUBE_EMBEDDED
 │   ├── widgets.py         # Custom Qt widgets
+│   ├── remote.py          # Phone remote: HTTP server, token auth, command validation (Qt-free)
+│   ├── remote_page.py     # The web page that opens on the phone
+│   ├── remote_ui.py       # Phone remote: QR panel, command handling on the GUI thread
+│   ├── qrcode_min.py      # Dependency-free QR code generator (Qt-free)
 │   └── compat.py          # Optional dependencies & logging
 ├── tools/
-│   └── stream_probe.py    # Measures which streams are too slow for real-time playback
+│   ├── stream_probe.py    # Measures which streams are too slow for real-time playback
+│   ├── remote_check.py    # Network diagnosis for the phone remote (+ --serve test server)
+│   ├── remote_firewall_windows.bat      # Opens the remote's ports for the local subnet (Windows)
+│   ├── remote_firewall_fix_blocks.bat   # Lists/removes Block rules for python.exe (Windows)
+│   └── remote_firewall_fix_blocks.ps1
 ├── tests/
 │   ├── stress_test.py     # Keyboard-storm + simulated VLC events stress test
 │   └── test_*.py          # Unit tests (run without PyQt5 or VLC)
@@ -263,6 +313,9 @@ python tests/test_chain_nogui.py   # stale events from the previous stream are i
 python tests/test_preview.py       # channel preview state machine
 python tests/test_routing.py       # source tiles: embedded YouTube vs Brave fallback
 python tests/test_probe_local.py   # stream_probe against a local throttled server
+python tests/test_qrcode.py        # QR encoder (decoded with OpenCV if installed)
+python tests/test_remote_server.py # remote HTTP server: auth, validation, rate limit
+python tests/test_remote_commands.py # phone commands -> app actions, end-to-end over HTTP
 ```
 
 **Stress test** – needs PyQt5; fires ~200 random key presses per second plus simulated VLC events from a background thread and checks for freezes, exceptions, memory growth and inconsistent UI state:
@@ -272,6 +325,7 @@ python tests/stress_test.py --seconds 60                 # offscreen UI, fake VL
 python tests/stress_test.py --real-vlc                   # real VLC (needs a display)
 python tests/stress_test.py --real-vlc --no-chaos        # key storm only
 python tests/stress_test.py --real-vlc --allow-web       # also exercise embedded YouTube
+python tests/stress_test.py --allow-remote               # also let the phone-remote server start
 ```
 
 The test never launches external programs and uses a temporary settings file. It writes `tests/stress_log.txt` (Python stacks of all threads when the UI freezes, and of the crashing thread on a native crash) and `tests/stress_keys.txt` (the key sequence), so a crash can be traced back. Do not commit these two files. Exit code `0` means everything is fine.
@@ -286,6 +340,9 @@ The test never launches external programs and uses a temporary settings file. It
 | YouTube opens in a separate window | QtWebEngine is missing (`pip install PyQtWebEngine`) or `YOUTUBE_EMBEDDED = False` |
 | YouTube crashes the app | Set `YOUTUBE_EMBEDDED = False` (see [known risk](#youtube)) |
 | Brave not found | Add its path to `extra_paths` in `tvbox/external_apps.py` |
+| Phone cannot open the remote page (works on the PC itself) | 1) Run `python tools/remote_check.py --serve` and open the printed address on the phone: if even that fails, it is the network/firewall, not tv-box. 2) Run `tools/remote_firewall_windows.bat` (allows TCP 8765–8784 for the local subnet). 3) If a *Block* rule for `python.exe` exists – Windows creates one when the firewall prompt is cancelled, and it overrides allow rules – remove it with `tools/remote_firewall_fix_blocks.bat`. 4) Check: same Wi-Fi (guest networks / client isolation), phone mobile data off, third-party antivirus firewalls. `python tools/remote_check.py` lists network profile, firewall state, block rules and antivirus products |
+| Remote says the permission is invalid | The token was changed (`N`); scan the new QR code |
+| YouTube search does nothing useful | See [Phone remote](#phone-remote): adjust `YOUTUBE_SEARCH_URL` in `tvbox/remote.py` |
 | Program says it is already running after a crash | Start it again; a stale lock is cleaned up automatically |
 | Brightness setting does nothing | The display has no controllable backlight (normal for HDMI monitors) |
 
@@ -295,11 +352,14 @@ The test never launches external programs and uses a temporary settings file. It
 - No EPG (Electronic Program Guide) yet
 - No channel health check on start-up (broken streams are retried automatically and can be found with `tools/stream_probe.py`, but are not skipped)
 - Embedded YouTube is limited by QtWebEngine and shares a window with VLC (see [known risk](#youtube))
+- The phone remote works on the local network only, over plain HTTP
+- YouTube search relies on a link format that YouTube does not document and may change
 - Single-window design (no multi-monitor support planned currently)
 
 ## Roadmap
 
 - [ ] Auto-skip channels that the health check marks as dead
+- [x] Phone remote control (QR code)
 - [ ] Simple EPG support
 - [ ] Favorites / recently watched
 - [ ] Better YouTube integration (or switch to a more robust web engine)

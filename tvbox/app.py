@@ -18,6 +18,7 @@ from tvbox.menus import MenuMixin
 from tvbox.webapps import WebAppMixin
 from tvbox.panels import PanelMixin
 from tvbox.input import InputMixin
+from tvbox.remote_ui import RemoteMixin
 
 
 # A beépített (QtWebEngine) YouTube jelenleg ki van kapcsolva (WEB_APP_ORDER
@@ -68,7 +69,7 @@ def main():
     sys.exit(app.exec_())
 
 
-class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, InputMixin, QMainWindow):
+class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, InputMixin, RemoteMixin, QMainWindow):
 
     PANEL_WIDTH = 380
 
@@ -123,6 +124,9 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         learned = saved_settings_block.get("_stream_cache")
         if isinstance(learned, dict):
             self.settings_data["_stream_cache"] = learned
+        saved_token = saved_settings_block.get("_remote_token")
+        if isinstance(saved_token, str) and 10 <= len(saved_token) <= 64:
+            self.settings_data["_remote_token"] = saved_token
 
         # A mentett témát MÁR ITT, a UI felépítése ELŐTT aktiváljuk, hogy
         # minden widget rögtön a helyes színekkel épüljön fel (ne kelljen
@@ -180,6 +184,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         self._build_error_card()
         self._build_exit_confirm_card()
         self._build_help_card()
+        self._build_remote_panel()
 
         # A mentett fényerőt is alkalmazzuk (ha a kijelző támogatja - lásd
         # _apply_brightness() a részletekért és a hiba-tűrésről).
@@ -207,6 +212,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         self.player_signals.buffering.connect(self._on_stream_buffering)
         self.player_signals.ended.connect(self._on_stream_ended)
         self._init_playback_helpers()
+        self._init_remote()
 
         try:
             em = self.player.event_manager()
@@ -432,6 +438,10 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
                 pass
         self.active_web_app = None
 
+        try:
+            self.stop_remote()
+        except Exception:
+            pass
         for name in ("play_debounce_timer", "stall_timer", "retry_timer",
                      "buffer_card_timer", "watchdog_timer", "external_watch_timer"):
             try:
@@ -492,6 +502,8 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
 
         self.volume_osd.move((w - self.volume_osd.width()) // 2, 40)
         self.preview_osd.move(w - self.preview_osd.width() - 28, 28)
+        rpw, rph = self.remote_panel.width(), self.remote_panel.height()
+        self.remote_panel.move((w - rpw) // 2, (h - rph) // 2)
 
         lw, lh = self.loading_card.width(), self.loading_card.height()
         self.loading_card.move((w - lw) // 2, (h - lh) // 2)

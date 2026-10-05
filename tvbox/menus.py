@@ -86,6 +86,7 @@ class MenuMixin:
 
     def open_menu(self):
         self._cancel_preview()
+        self.close_remote_panel()
         self._stop_menu_slide()
         if self.mode_menu_visible:
             self.close_mode_menu()
@@ -224,6 +225,7 @@ class MenuMixin:
 
     def open_mode_menu(self):
         self._cancel_preview()
+        self.close_remote_panel()
         if self.menu_visible:
             self.close_menu()
         if self.settings_visible:

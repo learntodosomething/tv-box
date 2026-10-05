@@ -31,6 +31,14 @@ class InputMixin:
         text = event.text()
         key_code = event.key()
 
+        # -- Telefonos távirányító QR-panel: N = új kód, bármi más becsukja --
+        if self.remote_panel_visible:
+            if text.lower() == "n":
+                self._remote_new_token()
+            else:
+                self.close_remote_panel()
+            return
+
         # -- Billentyű-súgó: ha nyitva van, BÁRMELYIK gomb becsukja --
         if self.help_visible:
             self.close_help()
@@ -38,6 +46,10 @@ class InputMixin:
 
         if text.lower() == "h" or text == "?":
             self.open_help()
+            return
+
+        if text.lower() == "r":
+            self.open_remote_panel()
             return
 
         # -- Beállítások panel --

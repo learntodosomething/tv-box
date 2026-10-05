@@ -98,3 +98,44 @@ szerint), de addig a gyakorlatban a beépített nézet nyílt meg. Visszaállít
  - tests/test_routing.py: az ALAPÉRTELMEZETT konfiguráció beépített YouTube-ot ad; QtWebEngine
    hiányában Brave-re esik vissza.
  - Stressz-teszt: a webnézet alapból továbbra is ki van hagyva; külön: --allow-web.
+
+v19 - telefonos távirányító (QR-kóddal)
+=======================================
+ - Beállítások -> "Telefonos távirányító" (alapból Ki) és az R gomb: QR-kód a TV-n; a telefon
+   böngészőjében megnyíló oldal (nincs telepítendő app). A QR a csatlakozáskor magától bezárul.
+ - Az oldal: iránygombok + OK, vissza/bezár, lista/forrás/beállítás, hangerő + némítás (nyomva
+   tartva ismétel), CH ▲/▼ (ugyanaz az előnézet, mint a nyilaknál), számbillentyűk,
+   csatornalista kereséssel, TV / Rádió / YouTube váltó, YouTube-keresés vagy link megnyitása.
+ - YouTube-ban a gombok a YouTube-nak mennek; a hangerő a videó hangerejét állítja (JS).
+ - A telefonról NEM lehet kilépni a programból (az Esc csak bezár).
+ - Biztonság: titkos token a QR-ban (N: új token), hibás próbálkozások korlátozása (10/perc),
+   parancs-lista és bemenet-ellenőrzés, 2 KB törzs-limit, nincs CORS; kikapcsolva nem hallgat.
+ - Új modulok: remote.py (HTTP-szerver, Qt nélkül), remote_page.py, remote_ui.py,
+   qrcode_min.py (függőségmentes QR-generátor, 1-6. verzió, L/M).
+ - Tesztek: test_qrcode (valódi dekóderrel, mind a 8 maszkkal), test_remote_server,
+   test_remote_commands (a teljes lánc HTTP-n át). Stressz-teszt: R/N gombok, --allow-remote.
+ - Ismert bizonytalanság: a YouTube-keresés mélylinkje (remote.py: YOUTUBE_SEARCH_URL) nem
+   ellenőrizhető offline; ha nem a találatokra érkezik, az URL-sablon egy sorban átírható.
+
+v19.1 - a telefon nem érte el az oldalt (Windows tűzfal)
+========================================================
+Tünet: a QR-kód linkje a gépen megnyílt, a telefonon nem. A szerver hibátlan (a LAN-címen
+helyben elérhető), a bejövő telefon-kapcsolatot a tűzfal blokkolta (a figyelmeztető ablak a
+fullscreen ablak mögött elbújhat).
+ - tools/remote_firewall_windows.bat: egykattintásos szabály (TCP 8765-8784, csak helyi alhálózat).
+ - tools/remote_check.py: kiírja a gép címeit, melyik porton hallgat a távirányító, megvan-e a
+   tűzfalszabály, és mit nyisson meg a telefon (token nélkül is betölt az oldal).
+ - QR-panel: 20 mp csatlakozó telefon nélkül kiírja a teendőket (azonos Wi-Fi, mobilnet ki, tűzfal).
+ - README: hibaelhárítás bővítve.
+
+v19.2 - a tűzfalszabály megvan, a telefon mégsem éri el
+=======================================================
+Mérés (remote_check): a szerver mindkét hálózati címen hallgat, a 'TV Box Remote' szabály megvan.
+Gyanú: a Windows a megszakított figyelmeztető ablak után a python.exe-re TILTÓ szabályt hoz létre,
+ami felülírja az engedélyezőt; vagy hálózati elkülönítés / harmadik fél tűzfala.
+ - remote_check.py: Windowson kiírja a hálózati profilt, a tűzfal-profilokat (AllowInboundRules),
+   a python-ra vonatkozó Block szabályokat és a víruskereső termékeket (PowerShell, nyelvfüggetlen).
+ - remote_check.py --serve [port]: a TV Box-tól független teszt-szerver; eldönti, hogy a hálózat
+   vagy az alkalmazás-specifikus szabály a hibás.
+ - tools/remote_firewall_fix_blocks.bat/.ps1: a python-ra vonatkozó Block szabályok listázása,
+   megerősítés után törlése.

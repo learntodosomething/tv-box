@@ -56,6 +56,7 @@ class PanelMixin:
 
     def open_help(self):
         self._cancel_preview()
+        self.close_remote_panel()
         if self.menu_visible:
             self.close_menu()
         if self.mode_menu_visible:
@@ -87,6 +88,7 @@ class PanelMixin:
 
     def open_settings(self):
         self._cancel_preview()
+        self.close_remote_panel()
         if self.menu_visible:
             self.close_menu()
         if self.mode_menu_visible:
@@ -147,6 +149,8 @@ class PanelMixin:
                 self.youtube_adblock_interceptor.set_enabled(value)
             if self.active_web_app == "youtube" and self.web_view is not None:
                 self.web_view.reload()
+        elif key == "remote_enabled":
+            self._apply_remote_setting(value)
         elif key == "info_card_ms":
             # Ha épp látszik az infókártya, az új beállítás szerint
             # azonnal újraindítjuk (vagy leállítjuk) az elrejtés-időzítőt,
@@ -201,6 +205,7 @@ class PanelMixin:
         self.radio_visualizer.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.number_osd.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.preview_osd.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
+        self.remote_panel.set_colors(theme.THEME.MENU_BG, theme.THEME.MENU_BORDER)
         self.volume_osd.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.loading_card.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
         self.exit_confirm_card.set_colors(theme.THEME.SOLID_BG, theme.THEME.SOLID_BORDER)
@@ -221,7 +226,7 @@ class PanelMixin:
             self._refresh_menu_items()
 
         for widget in (self.info_card, self.menu_panel, self.mode_menu, self.settings_panel,
-                       self.radio_visualizer, self.number_osd, self.preview_osd, self.volume_osd,
+                       self.radio_visualizer, self.number_osd, self.preview_osd, self.remote_panel, self.volume_osd,
                        self.loading_card, self.exit_confirm_card, self.help_card):
             widget.update()
 

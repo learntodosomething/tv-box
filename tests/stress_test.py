@@ -24,6 +24,7 @@ ap.add_argument("--real-vlc", action="store_true")
 ap.add_argument("--rate", type=int, default=200, help="billentyű/mp")
 ap.add_argument("--seed", type=int, default=None)
 ap.add_argument("--allow-web", action="store_true", help="a beépített YouTube (QtWebEngine) útvonalat is tesztelje - ÖNÁLLÓ futtatásban érdemes, mert a Chromium ismert összeomlás-forrás (alapból tiltva)")
+ap.add_argument("--allow-remote", action="store_true", help="a telefonos távirányító HTTP-szerverét is elindíthatja (tűzfal-kérdést válthat ki)")
 ap.add_argument("--no-chaos", action="store_true", help="ne lőjünk szimulált VLC-eseményeket (csak billentyűk)")
 ap.add_argument("--fake-block", type=float, default=0.8, help="hamis VLC: set_media max. blokkolása mp-ben")
 args = ap.parse_args()
@@ -139,6 +140,9 @@ launches = [0]
 def _no_launch(key):
     launches[0] += 1
 win._launch_external_app = _no_launch
+if not args.allow_remote:
+    # Alapból NEM nyitunk valódi hálózati portot (Windows tűzfal-kérdés, külső elérés).
+    win.start_remote = lambda: False
 if not args.allow_web:
     win._show_web_app = lambda key: launches.__setitem__(0, launches[0] + 1)
 win.show()
@@ -171,7 +175,7 @@ if not args.no_chaos:
 
 # ------------------------------------------------ billentyű-vihar
 KEYS = ([Qt.Key_Left] * 12 + [Qt.Key_Right] * 12 + [Qt.Key_Up] * 4 + [Qt.Key_Down] * 4 +
-        [Qt.Key_M] * 5 + [Qt.Key_B] * 3 + [Qt.Key_S] * 2 + [Qt.Key_H] + [Qt.Key_Return] * 4 +
+        [Qt.Key_M] * 5 + [Qt.Key_B] * 3 + [Qt.Key_S] * 2 + [Qt.Key_H] + [Qt.Key_R] * 2 + [Qt.Key_N] + [Qt.Key_Return] * 4 +
         [Qt.Key_Backspace] * 2 + [Qt.Key_V, Qt.Key_Space] +
         [getattr(Qt, "Key_%d" % d) for d in range(10)] * 2)
 
@@ -214,7 +218,7 @@ key_timer.stop(); stop_flag.set()
 for _ in range(60):
     QTest.qWait(100)
     if not any(getattr(getattr(win, n), "_hiding", False) for n in
-               ("info_card", "volume_osd", "number_osd", "preview_osd", "loading_card", "error_card")):
+               ("info_card", "volume_osd", "number_osd", "preview_osd", "remote_panel", "loading_card", "error_card")):
         break
 problems = []
 if win.menu_visible != win.menu_panel.isVisible():
@@ -222,10 +226,12 @@ if win.menu_visible != win.menu_panel.isVisible():
 if (win.video_frame.width(), win.video_frame.height()) != (win.width(), win.height()):
     problems.append("videófelület mérete eltér az ablaktól: %sx%s vs %sx%s" % (
         win.video_frame.width(), win.video_frame.height(), win.width(), win.height()))
-stuck = [n for n in ("info_card", "volume_osd", "number_osd", "preview_osd", "loading_card", "error_card")
+stuck = [n for n in ("info_card", "volume_osd", "number_osd", "preview_osd", "remote_panel", "loading_card", "error_card")
          if getattr(win, n).isVisible() and getattr(getattr(win, n), "_hiding", False)]
 if stuck:
     problems.append("félbemaradt eltűnés-animáció: %s" % stuck)
+if win.remote_panel_visible != win.remote_panel.isVisible() and not getattr(win.remote_panel, "_hiding", False):
+    problems.append("QR-panel állapot eltér: remote_panel_visible=%s, látszik=%s" % (win.remote_panel_visible, win.remote_panel.isVisible()))
 if win._preview_key is not None and not win.preview_timer.isActive():
     problems.append("az előnézet 'beragadt': kulcs=%s, de nem fut az időzítő" % win._preview_key)
 if win._preview_key is None and win.preview_osd.isVisible() and not getattr(win.preview_osd, "_hiding", False):

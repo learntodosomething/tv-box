@@ -86,6 +86,10 @@ SETTINGS_SCHEMA = [
         "labels": ["3 mp", "5 mp", "8 mp", "Mindig látszik"], "default": 5000,
     },
     {
+        "key": "remote_enabled", "label": "Telefonos távirányító", "kind": "bool",
+        "options": [True, False], "labels": ["Be", "Ki"], "default": False,
+    },
+    {
         "key": "youtube_adblock", "label": "YouTube reklámblokkoló", "kind": "bool",
         "options": [True, False], "labels": ["Be", "Ki"], "default": False,
     },

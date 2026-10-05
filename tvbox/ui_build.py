@@ -536,6 +536,7 @@ class UIBuildMixin:
             ("M", "Csatornalista meg-/bezárása"),
             ("B", "Forrásváltás (TV / Rádió / YouTube)"),
             ("S", "Beállítások meg-/bezárása"),
+            ("R", "Telefonos távirányító (QR-kód)"),
             ("H / ?", "Ez a súgó"),
             ("Esc / Q", "Kilépés"),
         ]
@@ -567,6 +568,6 @@ class UIBuildMixin:
         # Bőkezű magasság, hogy a 10 billentyű-sor semmiképp se lógjon bele
         # a lekerekített sarok-maszkba (lásd a GlassPanel elején lévő
         # magyarázatot arról, hogy a tartalom sosem nyúlhat a maszkon túlra).
-        panel.setFixedSize(380, 600)
+        panel.setFixedSize(380, 640)
         panel.hide()
         self.help_card = panel
