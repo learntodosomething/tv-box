@@ -45,6 +45,7 @@ class MenuMixin:
         self.menu_count_label.setText("%d %s" % (len(self.channels), state["unit"]))
         self._show_menu_list_for_mode(self.mode)
         self._update_current_highlight(self.mode)
+        self._refresh_menu_epg()
 
     def _center_menu_on_current(self):
         """A jelenlegi csatornára görgetést KÜLÖN, a panel láthatóvá

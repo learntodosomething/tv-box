@@ -35,6 +35,59 @@ def test_page_served_without_token_api_requires_it():
         assert call(srv, "GET", "/nincs")[0] == 404
     finally: srv.stop()
 
+def test_power_and_setting_commands_are_validated():
+    v = remote.validate_command
+    assert v({"cmd": "power", "state": "off", "held": 2000}, []) == {"cmd": "power", "state": "off"}
+    assert v({"cmd": "power", "state": "on", "held": 1800}, []) == {"cmd": "power", "state": "on"}
+    for bad in ({"cmd": "power", "state": "off"},                           # nincs nyomva tartás
+                {"cmd": "power", "state": "off", "held": 500},              # túl rövid
+                {"cmd": "power", "state": "off", "held": True},
+                {"cmd": "power", "state": "off", "held": "2000"},
+                {"cmd": "power", "state": "reboot", "held": 3000},
+                {"cmd": "power", "held": 3000}):
+        assert v(bad, []) is None, bad
+    keys = ["brightness", "theme"]
+    assert v({"cmd": "setting", "key": "theme", "dir": 1}, [], keys) == {"cmd": "setting", "key": "theme", "dir": 1}
+    for bad in ({"cmd": "setting", "key": "nincs", "dir": 1}, {"cmd": "setting", "key": "theme", "dir": 2},
+                {"cmd": "setting", "key": "theme", "dir": True}, {"cmd": "setting", "key": "theme"},
+                {"cmd": "setting", "key": ["theme"], "dir": 1}):
+        assert v(bad, [], keys) is None, bad
+    assert v({"cmd": "setting", "key": "theme", "dir": 1}, []) is None       # kulcslista nélkül nem fogadja el
+
+
+def test_power_and_setting_over_http():
+    got = []
+    cat = dict(CATALOG); cat["settings"] = [{"k": "theme", "l": "Téma", "o": ["a", "b"]}]
+    srv = remote.RemoteServer(TOKEN, got.append, lambda: {}, lambda: cat, PAGE, host="127.0.0.1", port=0)
+    srv.start()
+    try:
+        assert call(srv, "POST", "/api/cmd", {"cmd": "power", "state": "off", "held": 100})[0] == 400
+        assert call(srv, "POST", "/api/cmd", {"cmd": "power", "state": "off", "held": 2000})[0] == 200
+        assert call(srv, "POST", "/api/cmd", {"cmd": "setting", "key": "theme", "dir": -1})[0] == 200
+        assert call(srv, "POST", "/api/cmd", {"cmd": "setting", "key": "hacker", "dir": 1})[0] == 400
+        assert got == [{"cmd": "power", "state": "off"}, {"cmd": "setting", "key": "theme", "dir": -1}], got
+    finally: srv.stop()
+
+
+def test_epg_endpoint_requires_token_and_info_key_is_whitelisted():
+    got = []
+    srv = remote.RemoteServer(TOKEN, got.append, lambda: {}, lambda: CATALOG, PAGE, host="127.0.0.1", port=0,
+                              get_epg=lambda: {"rev": 7, "now": {"tv": {"1": "18:00 Híradó"}}})
+    srv.start()
+    try:
+        assert call(srv, "GET", "/api/epg", token=None)[0] == 401
+        st, body = call(srv, "GET", "/api/epg")
+        assert st == 200 and json.loads(body)["now"]["tv"]["1"] == "18:00 Híradó"
+        assert call(srv, "POST", "/api/cmd", {"cmd": "key", "name": "info"})[0] == 200
+        assert got and got[-1] == {"cmd": "key", "name": "info"}
+    finally: srv.stop()
+    # EPG-szolgáltató nélkül (régi hívó): üres, de érvényes válasz
+    srv, _ = make()
+    try:
+        st, body = call(srv, "GET", "/api/epg")
+        assert st == 200 and json.loads(body)["now"] == {}
+    finally: srv.stop()
+
 def test_commands_are_validated_and_dispatched():
     srv, got = make()
     try:

@@ -109,6 +109,8 @@ class PlayerMixin:
     def play_channel(self, key):
         if key not in self.channels:
             return
+        if getattr(self, "standby", False):
+            return                      # készenlétben semmi nem indíthat lejátszást
         self._cancel_preview()
 
         # Ha épp egy beépített webnézet (pl. YouTube) volt aktív, most
@@ -131,6 +133,7 @@ class PlayerMixin:
 
         self.channel_badge.setText(key)
         self.channel_name_label.setText(name)
+        self._update_epg_info()
         self.update_time()
 
         if is_radio:
@@ -329,6 +332,7 @@ class PlayerMixin:
 
         self._preview_key = key
         name = self.channels[key][0]
+        self._update_preview_epg(key)
         fm = QFontMetrics(self.preview_name.font())
         self.preview_name.setText(fm.elidedText(name, Qt.ElideRight, 250))
         self.preview_badge.setText(key)

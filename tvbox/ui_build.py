@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
 """A főablak elemeinek felépítése (kártyák, menük, OSD-k)."""
-from PyQt5.QtWidgets import (QAbstractItemView, QHBoxLayout, QListWidget, QListWidgetItem, QProgressBar, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QListWidget, QListWidgetItem, QProgressBar, QVBoxLayout, QWidget)
 from PyQt5.QtGui import QColor, QFont
 from PyQt5.QtCore import QPropertyAnimation, QSize, Qt
 from tvbox.config import SETTINGS_SCHEMA
 from tvbox.external_apps import (EXTERNAL_APPS, EXTERNAL_ORDER, WEB_APPS, WEB_APP_ORDER)
 from tvbox.theme import (MENU_STYLE, _font, _label, set_translucent)
-from tvbox.widgets import (CategoryHeaderWidget, ChannelItemWidget, EqualizerBars, GlassPanel, PillButton, SettingsRowWidget, SourceTile, SpinnerWidget, TintedLabel)
+from tvbox.widgets import (CategoryHeaderWidget, ChannelItemWidget, ElidedLabel, EpgProgressBar, EqualizerBars, GlassPanel, PillButton, SettingsRowWidget, SourceTile, SpinnerWidget, TintedLabel)
 from tvbox import theme
 
 
 class UIBuildMixin:
+
+    INFO_CARD_H_EPG = 128       # info kártya magassága EPG-forrással
+    MENU_ROW_H = 56             # csatornalista-sor magassága
+    MENU_ROW_H_EPG = 70         # ... EPG-forrással (a név alatti műsor-sor miatt)
 
     # ------------------------------------------------------------------
     # UI felépítés
@@ -37,6 +41,14 @@ class UIBuildMixin:
         text_col.setAlignment(Qt.AlignVCenter)
         self.channel_name_label = _label("", size=18, weight=QFont.DemiBold, color="#FFFFFF")
         text_col.addWidget(self.channel_name_label)
+        # EPG: most futó műsor + előrehaladás + következő műsor. Amíg nincs
+        # adat, mindhárom rejtett, és a kártya pontosan úgy néz ki, mint előtte.
+        self.epg_now_label = ElidedLabel(size=11, weight=QFont.Medium, color="#FFFFFF")
+        self.epg_progress = EpgProgressBar(height=4)
+        self.epg_next_label = ElidedLabel(size=10, weight=QFont.Medium, color=theme.THEME.TEXT_DIM)
+        for w in (self.epg_now_label, self.epg_progress, self.epg_next_label):
+            w.hide()
+            text_col.addWidget(w)
         row.addLayout(text_col, 1)
 
         time_col = QVBoxLayout()
@@ -53,7 +65,8 @@ class UIBuildMixin:
         time_col.addWidget(self.date_label)
         row.addLayout(time_col)
 
-        panel.setFixedSize(480, 100)
+        # EPG-forrás esetén magasabb kártya (az extra sorok miatt); nélküle a régi méret.
+        panel.setFixedSize(480, self.INFO_CARD_H_EPG if getattr(self, "epg_source", "") else 100)
         panel.hide()
         self.info_card = panel
 
@@ -147,7 +160,8 @@ class UIBuildMixin:
                 name = state["channels"][key][0]
                 item = QListWidgetItem()
                 item.setData(Qt.UserRole, key)
-                item.setSizeHint(QSize(280, 56))
+                item.setSizeHint(QSize(280, self.MENU_ROW_H_EPG if getattr(self, "epg_source", "")
+                                       else self.MENU_ROW_H))
                 listw.addItem(item)
                 widget = ChannelItemWidget(key, name, is_current=(key == state["current_key"]))
                 listw.setItemWidget(item, widget)
@@ -302,10 +316,10 @@ class UIBuildMixin:
         header_row.setSpacing(10)
         icon = TintedLabel(
             "⚙️", bg_color=QColor(theme.THEME.ACCENT.red(), theme.THEME.ACCENT.green(), theme.THEME.ACCENT.blue(), 42),
-            text_color=QColor("#FFFFFF"), font=_font(15), fixed_size=(34, 34),
+            text_color=QColor("#FFFFFF"), font=_font(20), fixed_size=(46, 46),
         )
         header_row.addWidget(icon)
-        self.settings_title_label = _label("Beállítások", size=18, weight=QFont.Bold, color="#FFFFFF")
+        self.settings_title_label = _label("Beállítások", size=26, weight=QFont.Bold, color="#FFFFFF")
         header_row.addWidget(self.settings_title_label)
         header_row.addStretch()
         layout.addLayout(header_row)
@@ -319,22 +333,31 @@ class UIBuildMixin:
         rows_layout.setSpacing(2)
         layout.addLayout(rows_layout)
 
+        # A panel NAGYOBB, mint korábban (TV-ről, kanapéról olvasva): a sormagasság és a betűméret
+        # a képernyő magasságához igazodik, hogy 720p-n is elférjen.
+        screen = QApplication.primaryScreen()
+        screen_h = screen.size().height() if screen is not None else 720
+        row_h, name_pt, badge_pt = (76, 22, 19) if screen_h >= 1000 else ((64, 20, 17) if screen_h >= 800 else (56, 18, 16))
+        self._settings_row_h = row_h
+
         self.settings_rows = []
         for spec in SETTINGS_SCHEMA:
             value = self.settings_data[spec["key"]]
             idx = spec["options"].index(value) if value in spec["options"] else 0
-            row_widget = SettingsRowWidget(spec["label"], spec["labels"][idx])
+            row_widget = SettingsRowWidget(spec["label"], spec["labels"][idx],
+                                           height=row_h, name_pt=name_pt, badge_pt=badge_pt)
             rows_layout.addWidget(row_widget)
             self.settings_rows.append(row_widget)
 
         hint = _label(
-            "↑ ↓ sor   •   ← → érték   •   Esc / S bezárás",
-            size=10, weight=QFont.Medium, color=theme.THEME.TEXT_FAINT,
+            "↑ ↓ sor   •   ← → érték   •   Esc / S bezár",
+            size=13, weight=QFont.Medium, color=theme.THEME.TEXT_FAINT,
         )
         hint.setAlignment(Qt.AlignCenter)
         layout.addWidget(hint)
 
-        panel.setFixedSize(380, 108 + len(SETTINGS_SCHEMA) * 46)
+        panel.setFixedSize(780 if screen_h >= 1000 else (700 if screen_h >= 800 else 640),
+                           150 + len(SETTINGS_SCHEMA) * row_h)
         panel.hide()
         self.settings_panel = panel
 
@@ -398,6 +421,9 @@ class UIBuildMixin:
         self.preview_name = _label("", size=16, weight=QFont.DemiBold, color="#FFFFFF")
         text_col.addWidget(self.preview_caption)
         text_col.addWidget(self.preview_name)
+        self.preview_epg = ElidedLabel(size=10, weight=QFont.Medium, color=theme.THEME.TEXT_DIM)
+        self.preview_epg.hide()
+        text_col.addWidget(self.preview_epg)
         row.addLayout(text_col, 1)
         layout.addLayout(row)
 
@@ -413,7 +439,7 @@ class UIBuildMixin:
         # Az időcsík csak kozmetika (a váltást a preview_timer végzi).
         self._preview_anim = QPropertyAnimation(self.preview_bar, b"value", self)
 
-        panel.setFixedSize(360, 112)
+        panel.setFixedSize(360, 128 if getattr(self, "epg_source", "") else 112)
         panel.hide()
         self.preview_osd = panel
 
@@ -537,6 +563,7 @@ class UIBuildMixin:
             ("B", "Forrásváltás (TV / Rádió / YouTube)"),
             ("S", "Beállítások meg-/bezárása"),
             ("R", "Telefonos távirányító (QR-kód)"),
+            ("I", "Műsorinfó (EPG)"),
             ("H / ?", "Ez a súgó"),
             ("Esc / Q", "Kilépés"),
         ]
@@ -568,6 +595,6 @@ class UIBuildMixin:
         # Bőkezű magasság, hogy a 10 billentyű-sor semmiképp se lógjon bele
         # a lekerekített sarok-maszkba (lásd a GlassPanel elején lévő
         # magyarázatot arról, hogy a tartalom sosem nyúlhat a maszkon túlra).
-        panel.setFixedSize(380, 640)
+        panel.setFixedSize(380, 684)
         panel.hide()
         self.help_card = panel

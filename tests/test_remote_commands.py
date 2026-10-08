@@ -3,7 +3,7 @@ import sys, os, json, importlib, types, urllib.request
 from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-KEYS = {n: i + 100 for i, n in enumerate(["Up", "Down", "Left", "Right", "Return", "Escape", "Backspace", "M", "B", "S", "H"] + list("0123456789"))}
+KEYS = {n: i + 100 for i, n in enumerate(["Up", "Down", "Left", "Right", "Return", "Escape", "Backspace", "M", "B", "S", "H", "I"] + list("0123456789"))}
 EVENTS, TIMERS = [], []
 
 class FakeKeyEvent:
@@ -41,6 +41,17 @@ def load(youtube_embedded=True):
         ext.WEB_APP_ORDER[:] = []; ext.EXTERNAL_ORDER[:] = ["youtube"]
     return importlib.import_module("tvbox.remote_ui")
 
+class FakeSysvol:
+    def __init__(s, available=True, percent=40, muted=False):
+        s.available, s.percent, s.muted, s.calls = available, percent, muted, []
+    def snapshot(s): return (s.percent, s.muted) if s.available else (None, None)
+    def refresh(s): s.calls.append(("refresh",))
+    def age(s): return 0.0
+    def change(s, d):
+        s.calls.append(("change", d))
+        if s.percent is not None: s.percent = max(0, min(100, s.percent + d))
+    def toggle_mute(s): s.calls.append(("mute",)); s.muted = not s.muted
+
 class Win:
     def __init__(s, ui):
         s.__class__ = type("Win", (Win, ui.RemoteMixin), {})
@@ -57,8 +68,12 @@ class Win:
         s.web_view = mock.MagicMock(); s.web_view.focusProxy.return_value = "PROXY"
         s.web_view.url.return_value.toString.return_value = ""
         s.calls = []
-        s.settings_data = {}
+        s.settings_data = {"theme": "aurora", "epg": True}
         s._remote_snapshot_data = {}
+        s._external_processes = {}
+        s._web_vol, s._web_vol_stamp = (None, None), 0.0
+        s.standby = False
+        s.sysvol = FakeSysvol()
     channels = property(lambda s: s.sources[s.mode]["channels"])
     current_key = property(lambda s: s.sources[s.mode]["current_key"])
     def _rec(s, name, *a): s.calls.append((name,) + a)
@@ -72,10 +87,14 @@ class Win:
     def _leave_web_app_and_resume(s): s._rec("leave_web")
     def _open_mode_menu_from_web_app(s): s._rec("source_web")
     def toggle_settings(s): s._rec("settings")
+    def _show_web_volume_osd(s): s._rec("web_osd", s._web_vol)
+    def _remote_power(s, st): s._rec("power", st); s.standby = (st == "off")
+    def _remote_step_setting(s, k, d): s._rec("setting", k, d); return True
     def open_help(s): s._rec("help")
     def close_settings(s): s._rec("close_settings"); s.settings_visible = False
     def close_help(s): s._rec("close_help"); s.help_visible = False
     def close_remote_panel(s): s._rec("close_remote"); s.remote_panel_visible = False
+    def epg_state_snapshot(s): return {"rev": 3, "now": {"t": "Híradó", "s": "18:00", "e": "18:30", "p": 0.5}, "next": None}   # EpgMixin-felület
 
 def fresh(embedded=True):
     EVENTS.clear(); TIMERS.clear()
@@ -125,6 +144,132 @@ def test_keys_go_to_youtube_when_active_unless_panel_open():
     assert not EVENTS and not w.calls                       # webnézetben nincs csatornalista
     w.mode_menu_visible = True; w._on_remote_command({"cmd": "key", "name": "right"})
     assert EVENTS[0][0] is w                                # nyitott TV Box-panel: a főablaké a billentyű
+
+def test_info_key_reaches_main_window_but_not_youtube():
+    ui, w = fresh()
+    w._on_remote_command({"cmd": "key", "name": "info"})
+    assert EVENTS[0] == (w, 6, KEYS["I"], "i")              # ugyanaz az út, mint a fizikai 'I'
+    EVENTS.clear(); w.active_web_app = "youtube"
+    w._on_remote_command({"cmd": "key", "name": "info"})
+    assert not EVENTS                                       # YouTube-nak NEM küldjük el az 'i' betűt
+
+def test_snapshot_carries_epg_and_stays_json_serializable():
+    ui, w = fresh()
+    w._remote_refresh_snapshot()
+    e = w._remote_snapshot_data["epg"]
+    assert e["now"]["t"] == "Híradó" and e["rev"] == 3
+    json.dumps(w._remote_snapshot_data)
+
+class FakeProc:
+    def __init__(s, alive=True): s.alive = alive
+    def poll(s): return None if s.alive else 0
+
+
+def test_power_command_and_standby_blocks_everything_else():
+    ui, w = fresh()
+    w._on_remote_command({"cmd": "power", "state": "off"})
+    assert ("power", "off") in w.calls and w.standby
+    w.calls.clear(); EVENTS.clear()
+    for cmd in ({"cmd": "key", "name": "up"}, {"cmd": "digit", "value": "5"}, {"cmd": "volume", "delta": 5},
+                {"cmd": "mute"}, {"cmd": "zap", "dir": 1}, {"cmd": "mode", "mode": "radio"},
+                {"cmd": "channel", "mode": "tv", "key": "2"}, {"cmd": "setting", "key": "theme", "dir": 1}):
+        w._on_remote_command(cmd)
+    assert w.calls == [] and EVENTS == [], (w.calls, EVENTS)        # készenlétben semmi nem fut le
+    w._on_remote_command({"cmd": "power", "state": "on"})
+    assert ("power", "on") in w.calls and not w.standby
+    w.calls.clear()
+    w._on_remote_command({"cmd": "zap", "dir": 1}); assert ("zap", 1) in w.calls   # újra él
+
+
+def test_setting_command_reaches_the_settings_machinery():
+    ui, w = fresh()
+    w._on_remote_command({"cmd": "setting", "key": "theme", "dir": 1})
+    assert ("setting", "theme", 1) in w.calls
+
+
+def test_snapshot_new_fields():
+    ui, w = fresh()
+    w.settings_visible = True
+    w._remote_refresh_snapshot()
+    d = w._remote_snapshot_data
+    assert d["standby"] is False and d["settings_open"] is True
+    assert d["settings"]["theme"] == 1 and d["settings"]["epg"] == 0      # opció-indexek (Aurora, Be)
+    assert d["vol_scope"] == "player" and d["volume"] == 70
+    cat = w._build_remote_catalog()
+    keys = [x["k"] for x in cat["settings"]]
+    assert "brightness" in keys and "theme" in keys
+    assert "remote_enabled" not in keys and "youtube_adblock" not in keys       # ezek már nincsenek
+    json.dumps(d); json.dumps(cat)
+
+
+def test_external_youtube_uses_system_volume_and_reports_it():
+    ui, w = fresh()
+    w._external_processes["youtube"] = FakeProc(True)
+    w._remote_refresh_snapshot()
+    d = w._remote_snapshot_data
+    assert d["active"] == "youtube" and d["status"] == "web"
+    assert d["volume"] == 40 and d["vol_scope"] == "system" and d["muted"] is False   # a RENDSZER-hangerő, nem a VLC-é (70)
+    w._on_remote_command({"cmd": "volume", "delta": 5})
+    assert ("change", 5) in w.sysvol.calls and ("vol", 5) not in w.calls               # a VLC-hangerőhöz nem nyúl
+    assert w._remote_snapshot_data["volume"] == 45                                    # a telefon az új értéket látja
+    w._on_remote_command({"cmd": "mute"})
+    assert ("mute",) in w.sysvol.calls and w._remote_snapshot_data["muted"] is True and ("mute",) not in w.calls
+    # a YouTube bezárása után újra a lejátszó hangereje számít
+    w._external_processes["youtube"] = FakeProc(False)
+    w._remote_refresh_snapshot()
+    assert w._remote_snapshot_data["vol_scope"] == "player" and w._remote_snapshot_data["volume"] == 70
+    w._on_remote_command({"cmd": "volume", "delta": 5}); assert ("vol", 5) in w.calls
+
+
+def test_external_youtube_without_system_volume_backend():
+    ui, w = fresh()
+    w.sysvol = FakeSysvol(available=False)
+    w._external_processes["youtube"] = FakeProc(True)
+    w._remote_refresh_snapshot()
+    d = w._remote_snapshot_data
+    assert d["volume"] is None and d["vol_scope"] == "none"
+    w._on_remote_command({"cmd": "volume", "delta": 5})                # nem dob kivételt, nem nyúl a VLC-hez
+    assert ("vol", 5) not in w.calls
+    json.dumps(d)
+
+
+def test_embedded_youtube_volume_is_the_videos_and_is_reported():
+    ui, w = fresh()
+    w.active_web_app = "youtube"
+    page = w.web_view.page()
+    state = {"v": 40, "m": False}
+    def js(script, cb=None):
+        if "v.volume+d" in script:
+            state["v"] = max(0, min(100, state["v"] + int(round(float(script.split("})(")[1].split(")")[0]) * 100)))); state["m"] = False
+        elif "muted=!v.muted" in script:
+            state["m"] = not state["m"]
+        if cb: cb([state["v"], state["m"]])
+    page.runJavaScript.side_effect = js
+    w._poll_web_volume()                                         # első olvasás
+    w._remote_refresh_snapshot(); d = w._remote_snapshot_data
+    assert d["vol_scope"] == "web" and d["volume"] == 40 and d["muted"] is False       # NEM a VLC 70-e
+    w._on_remote_command({"cmd": "volume", "delta": 5})
+    assert ("vol", 5) not in w.calls                             # a VLC-hangerőhöz nem nyúl
+    assert w._remote_snapshot_data["volume"] == 45               # a telefon azonnal az újat látja
+    assert w.calls[-1] == ("web_osd", (45, False))               # és a TV-n is megjelenik a hangerő-kártya
+    w._on_remote_command({"cmd": "volume", "delta": -20}); assert w._remote_snapshot_data["volume"] == 25
+    w._on_remote_command({"cmd": "mute"})
+    assert w._remote_snapshot_data["muted"] is True and w.calls[-1] == ("web_osd", (25, True))
+    # a YouTube saját csúszkájával is állították: a következő olvasás utánköveti
+    state["v"] = 90; w._web_vol_stamp = 0.0; w._poll_web_volume(); w._remote_refresh_snapshot()
+    assert w._remote_snapshot_data["volume"] == 90
+    # nincs <video> elem (pl. a YouTube kezdőlapján): nem dob hibát, nem ír át semmit
+    page.runJavaScript.side_effect = lambda script, cb=None: cb(None) if cb else None
+    w._on_remote_command({"cmd": "volume", "delta": 5}); assert w._web_vol == (90, True)
+    json.dumps(w._remote_snapshot_data)
+    # hibás/értelmetlen JS-válaszok
+    for bad in ("x", [], [None, True], ["a", 1], 5, {"a": 1}):
+        assert w._store_web_volume(bad) is False
+    assert w._store_web_volume([250, 1]) and w._web_vol == (100, True)           # szélső érték levágva
+    # kilépve a YouTube-ból újra a lejátszó hangereje számít
+    w.active_web_app = None; w._poll_web_volume(); assert w._web_vol == (None, None)
+    w._remote_refresh_snapshot(); assert w._remote_snapshot_data["vol_scope"] == "player" and w._remote_snapshot_data["volume"] == 70
+
 
 def test_phone_can_never_quit_the_app():
     ui, w = fresh()

@@ -35,6 +35,7 @@ def load():
         def _show_widget(s, w): pass
         def _hide_widget(s, w): pass
         def _animations_enabled(s): return True
+        def _update_preview_epg(s, key): pass          # EpgMixin-felület (itt nincs rá szükség)
     return F
 
 def test_arrows_only_preview_then_switch_after_delay():

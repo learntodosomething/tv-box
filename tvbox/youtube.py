@@ -19,10 +19,9 @@ from tvbox.compat import QWebEngineUrlRequestInterceptor, logger
 # felismerte a hibát és továbblépett a tényleges tartalomra - vagyis a
 # reklámblokkoló ebben a konkrét, Leanback/TV-felületen ROSSZABB, zavaróbb
 # felhasználói élményt adott, mint maga a reklám. EZÉRT ez a funkció
-# alapértelmezetten KI van kapcsolva (lásd SETTINGS_SCHEMA fent,
-# "youtube_adblock": default False) - a Beállítások menüben bármikor
-# visszakapcsolható, de ott a fenti sötét-képernyős mellékhatással kell
-# számolni.
+# Mostantól MINDIG be van kapcsolva (nincs hozzá beállítás) - de csak a beépített
+# QtWebEngine-nézetre hat, amit jelenleg a WEB_APP_ORDER = [] kikapcsol. A külön
+# Brave-ablakban futó YouTube-ot a Brave saját Shields-e védi.
 # ===========================================================================
 if QWebEngineUrlRequestInterceptor is not None:
     class YouTubeAdBlockInterceptor(QWebEngineUrlRequestInterceptor):

@@ -46,7 +46,7 @@ def save_settings(data):
 # `kind`:
 #   "choice"     - `options` listából választ, `labels` a megjelenő szöveg
 #   "bool"       - Be/Ki kapcsoló (két "choice" opció "Be"/"Ki" címkével)
-#   "brightness" - kijelző-fényerő, `options` egész % értékek listája
+#   "brightness" - kijelző-fényerő: fekete fedőréteg (lásd dimmer.py), `options` egész % értékek
 #   "theme"      - `options` a THEMES kulcsai, `labels` a téma neve
 # ===========================================================================
 SETTINGS_SCHEMA = [
@@ -86,23 +86,14 @@ SETTINGS_SCHEMA = [
         "labels": ["3 mp", "5 mp", "8 mp", "Mindig látszik"], "default": 5000,
     },
     {
-        "key": "remote_enabled", "label": "Telefonos távirányító", "kind": "bool",
-        "options": [True, False], "labels": ["Be", "Ki"], "default": False,
-    },
-    {
-        "key": "youtube_adblock", "label": "YouTube reklámblokkoló", "kind": "bool",
-        "options": [True, False], "labels": ["Be", "Ki"], "default": False,
+        "key": "epg", "label": "Műsorinfó (EPG)", "kind": "bool",
+        "options": [True, False], "labels": ["Be", "Ki"], "default": True,
     },
 ]
 
-
-# Azon kijelző-háttérvilágítás sysfs-mappáinak keresési mintája, amikre a
-# "Fényerő" beállítás írni próbál. Raspberry Pi-n hivatalos érintő-kijelzőnél
-# (pl. `rpi_backlight`) ez általában létezik; egy sima HDMI-monitornál
-# tipikusan NINCS szoftveresen vezérelhető háttérvilágítás - ilyenkor a
-# beállítás a kártyán megjelenik, de csendben hatástalan marad (naplózott
-# figyelmeztetéssel), nem okoz hibát.
-BACKLIGHT_GLOB = "/sys/class/backlight/*/"
+# A telefonos távirányító és a YouTube reklámblokkoló MINDIG be van kapcsolva - nincs
+# hozzájuk beállítás (régebbi mentésekben maradt "remote_enabled" / "youtube_adblock"
+# kulcsokat a betöltés figyelmen kívül hagyja).
 
 
 # ===========================================================================

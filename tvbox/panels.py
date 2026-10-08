@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 """Kilépés-megerősítés, súgó, beállítások panel, fényerő, téma, animációk."""
-import glob
-import os
 from PyQt5.QtCore import QEasingCurve, QPropertyAnimation, QTimer
 from tvbox.compat import logger
-from tvbox.config import BACKLIGHT_GLOB, SETTINGS_SCHEMA
+from tvbox.config import SETTINGS_SCHEMA
 from tvbox.theme import _set_active_theme, _volume_bar_stylesheet
 from tvbox import theme
 
@@ -94,6 +92,8 @@ class PanelMixin:
         if self.mode_menu_visible:
             self.close_mode_menu()
         self.setFocus()
+        if self.info_card.isVisible():
+            self._hide_widget(self.info_card)       # ne takarja/lógjon bele a nagyobb panelbe
         self.settings_visible = True
         self._settings_cursor = 0
         self._refresh_settings_rows()
@@ -120,9 +120,23 @@ class PanelMixin:
         self._refresh_settings_rows()
 
     def _step_settings_value(self, direction):
-        if not self.settings_rows:
+        self._step_setting_at(self._settings_cursor, direction)
+
+    def _remote_step_setting(self, key, direction):
+        """Telefonról érkező beállítás-léptetés (kulcs szerint). Ha a TV-n nyitva a
+        panel, a kiemelés is odaugrik, így a két kijelző ugyanazt mutatja."""
+        for i, spec in enumerate(SETTINGS_SCHEMA):
+            if spec["key"] == key:
+                if self.settings_visible:
+                    self._settings_cursor = i
+                self._step_setting_at(i, direction)
+                return True
+        return False
+
+    def _step_setting_at(self, index, direction):
+        if not self.settings_rows or not (0 <= index < len(SETTINGS_SCHEMA)):
             return
-        spec = SETTINGS_SCHEMA[self._settings_cursor]
+        spec = SETTINGS_SCHEMA[index]
         options = spec["options"]
         current_value = self.settings_data[spec["key"]]
         idx = options.index(current_value) if current_value in options else 0
@@ -144,13 +158,6 @@ class PanelMixin:
             self._apply_brightness(value)
         elif key == "theme":
             self.apply_theme(value)
-        elif key == "youtube_adblock":
-            if self.youtube_adblock_interceptor is not None:
-                self.youtube_adblock_interceptor.set_enabled(value)
-            if self.active_web_app == "youtube" and self.web_view is not None:
-                self.web_view.reload()
-        elif key == "remote_enabled":
-            self._apply_remote_setting(value)
         elif key == "info_card_ms":
             # Ha épp látszik az infókártya, az új beállítás szerint
             # azonnal újraindítjuk (vagy leállítjuk) az elrejtés-időzítőt,
@@ -163,28 +170,6 @@ class PanelMixin:
         # számbeírás-türelem) a self.settings_data-ból olvasódik ki
         # a megfelelő helyeken (lásd reset_menu_timer, _append_digit,
         # _handle_exit_request, _animations_enabled).
-
-    def _apply_brightness(self, percent):
-        """Kijelző-háttérvilágítás állítása sysfs-en keresztül (Raspberry
-        Pi hivatalos érintő-kijelzőjénél tipikusan elérhető). Ha a
-        rendszeren nincs vezérelhető háttérvilágítás (pl. sima HDMI-
-        monitor), ez CSENDBEN, hiba nélkül nem csinál semmit - a
-        beállítás a felületen továbbra is látszik és állítható marad,
-        csak nincs látható hatása azon a kijelzőn."""
-        try:
-            candidates = glob.glob(BACKLIGHT_GLOB)
-            if not candidates:
-                return
-            backlight_dir = candidates[0]
-            max_path = os.path.join(backlight_dir, "max_brightness")
-            brightness_path = os.path.join(backlight_dir, "brightness")
-            with open(max_path) as f:
-                max_value = int(f.read().strip())
-            target = max(1, int(round(max_value * (percent / 100.0))))
-            with open(brightness_path, "w") as f:
-                f.write(str(target))
-        except Exception as e:
-            logger.info("Fényerő-szabályzás nem elérhető ezen a kijelzőn (%s).", e)
 
     def apply_theme(self, key):
         """Élő témaváltás: az új THEME azonnal érvényesül a jelenleg

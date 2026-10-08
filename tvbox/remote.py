@@ -34,11 +34,12 @@ MAX_FAILS = 10
 FAIL_WINDOW_S = 60.0
 
 KEY_NAMES = frozenset(["up", "down", "left", "right", "enter", "esc", "back",
-                       "menu", "source", "settings", "help"])
+                       "menu", "source", "settings", "help", "info"])
 
 # YouTube címsablonok. FIGYELEM: a keresési mélylinket (Leanback/TV felület) nem tudtam
 # offline ellenőrizni; ha a keresés nem a találatokra érkezik, itt kell átírni.
 # Alternatíva a kereséshez:  "https://www.youtube.com/results?search_query={q}"
+POWER_HOLD_MIN_MS = 1800      # a "kikapcsol/bekapcsol" parancs csak elegendő nyomva tartással fogadható el
 YOUTUBE_SEARCH_URL = "https://www.youtube.com/tv#/search?q={q}"
 YOUTUBE_WATCH_URL = "https://www.youtube.com/watch?v={v}"
 
@@ -72,7 +73,7 @@ def lan_ip():
     return ip
 
 
-def validate_command(obj, modes):
+def validate_command(obj, modes, setting_keys=()):
     """A telefonról érkező JSON ellenőrzése. Visszaad egy tisztított dict-et vagy None-t."""
     if not isinstance(obj, dict):
         return None
@@ -101,6 +102,17 @@ def validate_command(obj, modes):
         if isinstance(m, str) and m in modes and isinstance(k, str) and k.isdigit() and 1 <= len(k) <= 4:
             return {"cmd": "channel", "mode": m, "key": k}
         return None
+    if cmd == "power":
+        st, held = obj.get("state"), obj.get("held")
+        if st in ("on", "off") and isinstance(held, int) and not isinstance(held, bool) \
+                and held >= POWER_HOLD_MIN_MS:
+            return {"cmd": "power", "state": st}
+        return None
+    if cmd == "setting":
+        k, d = obj.get("key"), obj.get("dir")
+        if isinstance(k, str) and k in setting_keys and d in (-1, 1) and not isinstance(d, bool):
+            return {"cmd": "setting", "key": k, "dir": d}
+        return None
     if cmd == "youtube":
         t = obj.get("text")
         if isinstance(t, str):
@@ -124,11 +136,12 @@ class _Server(ThreadingHTTPServer):
 
 class RemoteServer:
     def __init__(self, token, dispatch, get_state, get_catalog, page_html,
-                 host="0.0.0.0", port=DEFAULT_PORT):
+                 host="0.0.0.0", port=DEFAULT_PORT, get_epg=None):
         self.token = token
         self.dispatch = dispatch
         self.get_state = get_state
         self.get_catalog = get_catalog
+        self.get_epg = get_epg or (lambda: {"rev": 0, "now": {}})
         self.page = page_html.encode("utf-8") if isinstance(page_html, str) else page_html
         self.host, self.port = host, port
         self.httpd = None
@@ -255,6 +268,9 @@ class RemoteServer:
                 elif path == "/api/channels":
                     if self._auth():
                         self._json(200, srv.get_catalog())
+                elif path == "/api/epg":
+                    if self._auth():
+                        self._json(200, srv.get_epg())
                 elif path == "/favicon.ico":
                     self._send(204)
                 else:
@@ -280,7 +296,8 @@ class RemoteServer:
                     self._json(400, {"error": "hibás JSON"})
                     return
                 modes = [m["key"] for m in srv.get_catalog().get("modes", [])]
-                clean = validate_command(obj, modes)
+                setting_keys = [s["k"] for s in srv.get_catalog().get("settings", [])]
+                clean = validate_command(obj, modes, setting_keys)
                 if clean is None:
                     self._json(400, {"error": "ismeretlen vagy hibás parancs"})
                     return

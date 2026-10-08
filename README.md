@@ -4,7 +4,7 @@ Modern desktop IPTV and radio player with Hungarian & Slovak channel support, bu
 
 Built with **Python + PyQt5 + VLC**.
 
-Version: **1.2.0b1** (v19 – phone remote control with QR code, on top of the v18 stability, buffering and TV-style switching work and the modular rewrite of the original single-file v17)
+Version: **1.3.0b1** (v20 – simple EPG, brightness overlay, standby from the phone, settings on the phone, YouTube volume; on top of the v19 phone remote, the v18 stability and buffering work and the modular rewrite of the original single-file v17)
 
 ## Contents
 
@@ -17,13 +17,15 @@ Version: **1.2.0b1** (v19 – phone remote control with QR code, on top of the v
 7. [Playback reliability and buffering](#playback-reliability-and-buffering)
 8. [YouTube](#youtube)
 9. [Phone remote](#phone-remote)
-10. [Project structure](#project-structure)
-11. [Adding channels](#adding-channels)
-12. [Themes](#themes)
-13. [Diagnostics and testing](#diagnostics-and-testing)
-14. [Troubleshooting](#troubleshooting)
-15. [Limitations](#limitations)
-16. [Roadmap](#roadmap)
+10. [Standby (power) and brightness](#standby-power-and-brightness)
+11. [EPG (programme guide)](#epg-programme-guide)
+12. [Project structure](#project-structure)
+13. [Adding channels](#adding-channels)
+14. [Themes](#themes)
+15. [Diagnostics and testing](#diagnostics-and-testing)
+16. [Troubleshooting](#troubleshooting)
+17. [Limitations](#limitations)
+18. [Roadmap](#roadmap)
 
 ## Features
 
@@ -42,9 +44,16 @@ Version: **1.2.0b1** (v19 – phone remote control with QR code, on top of the v
 - The switch happens after a short wait (3 s by default) or instantly on Enter
 - Typing a channel number works as on a real remote
 
+**EPG (programme guide)**
+- Shows what is on now and what comes next, from any XMLTV file or URL (see [EPG](#epg-programme-guide))
+- Info card with progress bar, programme title under every channel in the list and in the channel preview, `I` for the programme info
+
 **Phone remote**
-- Scan a QR code on the TV and control the box from your phone's browser – no app to install
+- Always on: scan a QR code on the TV and control the box from your phone's browser – no app to install
 - D-pad, volume, channel list with search, number pad, and switching between TV / Radio / YouTube
+- Full **Settings** tab: change every setting from the phone, the TV follows instantly
+- **Power button**: hold 2 seconds to switch the TV Box off (standby), hold 2 seconds to switch it back on
+- Real volume percentage, also inside YouTube; now / next programme
 - YouTube search typed on the phone (see [Phone remote](#phone-remote))
 
 **Reliable playback**
@@ -117,6 +126,8 @@ Only one instance can run at a time.
 | `B` | Source menu (TV / Radio / YouTube / Settings) |
 | `S` | Settings |
 | `R` | Phone remote: show the QR code |
+| `I` | Programme info (EPG): shows the info card with the current and the next programme |
+| any key | While in standby: wake up |
 | `H` or `?` | Key help (any key closes it) |
 | `Q` | Quit (asks for confirmation, if enabled) |
 
@@ -132,19 +143,20 @@ Only one instance can run at a time.
 
 ## Settings
 
-Open with `S` or from the source menu. Changes apply immediately and are saved to `~/.tvbox_settings.json`.
+Open with `S`, from the source menu, or from the **Settings tab of the phone remote** (the TV and the phone show the same values, and a change on either one appears on both). The panel is large so it can be read from the sofa. Changes apply immediately and are saved to `~/.tvbox_settings.json`.
+
+The phone remote and the YouTube ad blocker have no setting any more: they are **always on**. (The ad blocker only affects the built-in YouTube view; the separate Brave window is protected by Brave's own Shields.)
 
 | Setting | Options | Default |
 |---|---|---|
-| Brightness | 20–100 % (needs a controllable backlight, e.g. the Raspberry Pi touch display; silently ignored otherwise) | 100 % |
+| Brightness | 20–100 %: a black, see-through layer in front of the whole screen (100 % = no dimming, lower = darker). See [Standby and brightness](#standby-power-and-brightness) | 100 % |
 | Theme | Midnight Blue / Aurora Amber | Midnight Blue |
 | Confirm exit | On / Off | On |
 | Menu auto-close | 3 s / 6 s / 10 s / Never | 6 s |
 | Animations | On / Off | On |
 | Switch patience | 2 s / 3 s / 5 s | 3 s |
 | Info card duration | 3 s / 5 s / 8 s / Always visible | 5 s |
-| Phone remote | On / Off (turning it on shows the QR code) | Off |
-| YouTube ad blocker | On / Off (experimental, can cause a dark screen before ads) | Off |
+| Programme info (EPG) | On / Off (only does something if an [EPG source](#epg-programme-guide) is set) | On |
 
 *Switch patience* is how long the app waits before switching to a previewed channel, and also how long it waits for the next digit of a typed number.
 
@@ -195,7 +207,7 @@ Control tv-box from your phone's browser – nothing to install on the phone.
 
 **Set up**
 
-1. On the TV Box open **Settings → Phone remote → On** (or press `R` once it is enabled). A QR code appears.
+1. The phone remote starts together with the TV Box. Press `R` on the keyboard to show the QR code.
 2. Scan it with your phone camera. The phone must be on the **same Wi-Fi / network** as the TV Box.
 3. The remote page opens and the QR code closes by itself. Add the page to your home screen if you like.
 
@@ -206,22 +218,61 @@ On Windows the first start triggers a firewall prompt – allow Python on *priva
 | Tab | Features |
 |---|---|
 | Remote | D-pad and OK, Back, Close, channel list / source menu / settings, volume and mute (hold to repeat), CH ▲/▼ (uses the same preview as the arrow keys), number pad |
-| Channels | The full TV and radio list with a search box; tap a channel to play it |
+| Channels | The full TV and radio list with a search box (it also searches the programme titles); tap a channel to play it |
+| Settings | Every setting with ◀ ▶ buttons (hold to repeat); the ⚙ button on the Remote tab opens this tab and the settings panel on the TV |
+| Power ⏻ | Top right: hold for 2 seconds to switch off. In standby the page shows a big ⏻ button: hold for 2 seconds to switch on |
 | YouTube | Search box: type a query (or paste a YouTube link), and the result opens on the TV |
-| Top bar | Now playing, status (buffering / error), pending channel preview, and one-tap switching between **TV**, **Radio** and **YouTube** |
+| Top bar | Now playing, current / next programme with a progress bar (if EPG is set), the volume percentage, status (buffering / error), pending channel preview, and one-tap switching between **TV**, **Radio** and **YouTube** |
 
-Inside YouTube the D-pad buttons are forwarded to YouTube itself, the volume buttons change the video volume, and *Close* returns to TV / Radio. The remote never quits the program – `Esc` from the phone only closes menus, panels and previews.
+Inside YouTube the D-pad buttons are forwarded to YouTube itself, the volume buttons change the video volume (the phone and the TV show the real percentage, read back from the video every second, so a change made inside YouTube shows up too; in the separate Brave window the volume buttons change the computer's master volume instead, via `wpctl` / `pactl` / `amixer` on Linux, `pycaw` on Windows, `osascript` on macOS), and *Close* returns to TV / Radio. The remote never quits the program – `Esc` from the phone only closes menus, panels and previews.
 
 **YouTube search** works in the embedded mode (`YOUTUBE_EMBEDDED = True`). The search link format of YouTube's TV interface is not documented, so the templates are constants at the top of `tvbox/remote.py` (`YOUTUBE_SEARCH_URL`, `YOUTUBE_WATCH_URL`). If a search does not land on the results page, change `YOUTUBE_SEARCH_URL` to `https://www.youtube.com/results?search_query={q}` (or another format) – no other change is needed. Typing on the phone also avoids a limitation of the physical keyboard: while YouTube is open, tv-box reserves `B`, `S`, `H` and `M` for its own shortcuts.
 
 **Security**
 
-- The server listens only while *Phone remote* is on (default: off) and uses the first free port from 8765 up.
+- The server runs while the TV Box runs (it has to, so the phone can switch the TV Box back on from standby) and uses the first free port from 8765 up.
 - Every request needs a secret token, which is part of the QR code and stored in `~/.tvbox_settings.json`. Press `N` on the QR screen to generate a new token and lock out every phone that scanned the old one.
 - Wrong tokens are rate-limited (10 attempts per minute per address), commands are whitelisted and validated, and request bodies are limited to 2 KB.
 - The connection is plain HTTP on your local network, so use it on a network you trust. Do not forward the port to the internet.
 
 The QR code is generated by the built-in encoder `tvbox/qrcode_min.py`, so no extra package is needed.
+
+## Standby (power) and brightness
+
+**Standby – "off" and "on" from the phone.** Hold the ⏻ button on the phone for **2 seconds** and the TV Box goes into standby: playback stops (the separate YouTube window is closed too), the whole screen turns black, and on X11 the monitor goes to sleep (`xset dpms force off`). The program keeps running – that is what lets the phone switch it back on: hold the big ⏻ button on the phone for 2 seconds, or press any key on the keyboard. In standby every other phone command is ignored. The server also rejects a power command that does not carry a hold time of at least 1.8 s, so a stray request cannot switch the box off. Standby does **not** shut the computer down: after that the phone could not reach it any more.
+
+**Brightness** is a black, see-through window in front of the whole screen. 100 % = no window at all (no dimming); the lower the value, the darker the picture (the layer's opacity is 100 % minus the brightness). It lies above the VLC video and the TV Box's own cards.
+
+- Windows, macOS, X11 with a compositing window manager: a transparent top-level window. On X11 it bypasses the window manager, because window managers put full-screen windows above "always on top" windows.
+- X11 *without* a compositor (older Raspberry Pi OS, plain openbox): see-through windows cannot be blended there, so the app switches to VLC's own brightness filter. That darkens only the video picture (a bit more strongly than the overlay), not the cards. Force a mode with the environment variable `TVBOX_DIM=overlay` or `TVBOX_DIM=vlc`.
+- Wayland: a client cannot place itself above other programs. If Qt runs in `xcb` (XWayland) mode, which is the PyQt5 default, the X11 behaviour applies.
+- The old `/sys/class/backlight` code is gone (on an HDMI monitor it did nothing). A Raspberry Pi touch display's hardware backlight can still be used separately.
+
+## EPG (programme guide)
+
+tv-box reads an **XMLTV** file (`.xml` or `.xml.gz`) and shows what is on now and next. No programme source is bundled: XMLTV is a standard format with many free and paid providers and grabbers, so use whichever covers your channels.
+
+**Set it up** – pick one (the first that exists wins):
+
+1. Environment variable: `TVBOX_EPG=https://example.com/epg.xml.gz` (or a file path)
+2. `~/.tvbox_settings.json`: inside the `"settings"` block add `"_epg_source": "https://example.com/epg.xml.gz"`
+3. Put the file at `~/.tvbox/epg.xml` (or `epg.xml.gz`) – handy if a cron job refreshes it with a grabber such as `tv_grab_huro`, WebGrab+ or iptv-org/epg
+
+Then run `python tools/epg_check.py` to see which of your channels were matched.
+
+| Where | What |
+|---|---|
+| Info card | Current programme with time span and progress bar, plus the next programme |
+| Channel list (`M`) | The current programme's title under each channel name |
+| Channel preview (`←` `→`) | The current programme of the channel you are stepping to |
+| `I` | Shows the info card again (also says if there is no EPG source or no data) |
+| Phone remote | Now / next in the top bar, the programme under each channel in the *Channels* tab |
+
+- The file is downloaded and parsed on a background thread, cached in `~/.tvbox/epg_<hash>.xml` and refreshed every 12 hours; at the next start the cache is used immediately, and if a download fails the cache is the fallback.
+- Only the channels in your list and programmes from 6 hours ago to 72 hours ahead are kept in memory.
+- Channels are matched by **name** (ignoring case, accents and a trailing "HD"), using the `display-name` and `id` of the XMLTV channels. If one is not matched, add its XMLTV name to `EPG_ALIASES` in `tvbox/epg_core.py`.
+- Safety limits: 80 MB download, 400 MB unpacked, 25 s per read / 180 s in total, 400 000 programmes. A broken or malicious file cannot hang or crash the app; at worst there is no programme info.
+- Switch it off with *Settings → Programme info (EPG)*. Without an EPG source the app looks and behaves as before.
 
 ## Project structure
 
@@ -248,16 +299,24 @@ tv-box/
 │   ├── remote.py          # Phone remote: HTTP server, token auth, command validation (Qt-free)
 │   ├── remote_page.py     # The web page that opens on the phone
 │   ├── remote_ui.py       # Phone remote: QR panel, command handling on the GUI thread
+│   ├── sysvol.py          # System master volume (separate YouTube window): wpctl / pactl / amixer / pycaw / osascript
+│   ├── dimmer.py          # Brightness: black see-through overlay (+ VLC filter fallback)
+│   ├── power.py           # Standby ("off" / "on") mode
+│   ├── epg.py             # EPG: background loading, timers, info card / list / preview / phone updates
+│   ├── epg_core.py        # EPG: XMLTV parser, name matching, download + cache (Qt-free)
 │   ├── qrcode_min.py      # Dependency-free QR code generator (Qt-free)
 │   └── compat.py          # Optional dependencies & logging
 ├── tools/
 │   ├── stream_probe.py    # Measures which streams are too slow for real-time playback
 │   ├── remote_check.py    # Network diagnosis for the phone remote (+ --serve test server)
+│   ├── epg_check.py       # Shows which channels an XMLTV source matches, and which are missing
 │   ├── remote_firewall_windows.bat      # Opens the remote's ports for the local subnet (Windows)
 │   ├── remote_firewall_fix_blocks.bat   # Lists/removes Block rules for python.exe (Windows)
 │   └── remote_firewall_fix_blocks.ps1
 ├── tests/
-│   ├── stress_test.py     # Keyboard-storm + simulated VLC events stress test
+│   ├── stress_test.py     # Keyboard storm + VLC events + flaky EPG server + standby/brightness + phone-remote load
+│   ├── epg_fixture.py     # Generates synthetic XMLTV files for the EPG tests
+│   ├── test_epg.py, test_sysvol.py, test_power_dim_settings.py   # EPG core, system volume, full-app test of standby / brightness / phone settings
 │   └── test_*.py          # Unit tests (run without PyQt5 or VLC)
 └── docs/
     ├── ELOZMENYEK_v17.txt # Changelog of the original single-file versions
@@ -325,7 +384,9 @@ python tests/stress_test.py --seconds 60                 # offscreen UI, fake VL
 python tests/stress_test.py --real-vlc                   # real VLC (needs a display)
 python tests/stress_test.py --real-vlc --no-chaos        # key storm only
 python tests/stress_test.py --real-vlc --allow-web       # also exercise embedded YouTube
-python tests/stress_test.py --allow-remote               # also let the phone-remote server start
+python tests/stress_test.py --allow-remote               # also hammer the phone-remote server over HTTP (state, lists, EPG, commands incl. power and settings)
+python tests/stress_test.py --real-vlc --local-streams   # real VLC against local ffmpeg HLS streams (good / 404 / slow / dead); needs ffmpeg
+python tests/stress_test.py --no-epg                     # without the EPG load
 ```
 
 The test never launches external programs and uses a temporary settings file. It writes `tests/stress_log.txt` (Python stacks of all threads when the UI freezes, and of the crashing thread on a native crash) and `tests/stress_keys.txt` (the key sequence), so a crash can be traced back. Do not commit these two files. Exit code `0` means everything is fine.
@@ -344,12 +405,16 @@ The test never launches external programs and uses a temporary settings file. It
 | Remote says the permission is invalid | The token was changed (`N`); scan the new QR code |
 | YouTube search does nothing useful | See [Phone remote](#phone-remote): adjust `YOUTUBE_SEARCH_URL` in `tvbox/remote.py` |
 | Program says it is already running after a crash | Start it again; a stale lock is cleaned up automatically |
-| Brightness setting does nothing | The display has no controllable backlight (normal for HDMI monitors) |
+| Brightness does not dim the cards / the YouTube window | On X11 without a compositor only the VLC picture is dimmed; see [Standby and brightness](#standby-power-and-brightness). Force `TVBOX_DIM=overlay` to try the overlay |
+| No programme info | Run `python tools/epg_check.py`; check that a source is set, that *Settings → Programme info (EPG)* is on, and add missing channel names to `EPG_ALIASES`. Press `I` on the TV: the card says whether there is no source, the file is still loading, or it could not be loaded |
+| YouTube volume percentage is `–` | Nothing to read yet (no video on the page). In the separate Brave window the master volume is used: it needs `wpctl`, `pactl` or `amixer` (Linux) or `pip install pycaw` (Windows) |
 
 ## Limitations
 
 - Streams depend on upstream availability (many free IPTV sources are unstable)
-- No EPG (Electronic Program Guide) yet
+- EPG needs an XMLTV source of your own; channels are matched by name, so some may need an alias; no programme descriptions or full-day guide screen yet
+- Standby switches the screen off but does not power the computer down; waking it needs the phone or a key
+- Brightness over a separate Brave window and on Wayland-native Qt depends on the window system (see [Standby and brightness](#standby-power-and-brightness))
 - No channel health check on start-up (broken streams are retried automatically and can be found with `tools/stream_probe.py`, but are not skipped)
 - Embedded YouTube is limited by QtWebEngine and shares a window with VLC (see [known risk](#youtube))
 - The phone remote works on the local network only, over plain HTTP
@@ -360,7 +425,8 @@ The test never launches external programs and uses a temporary settings file. It
 
 - [ ] Auto-skip channels that the health check marks as dead
 - [x] Phone remote control (QR code)
-- [ ] Simple EPG support
+- [x] Simple EPG support
+- [x] Brightness overlay, standby from the phone, settings on the phone, YouTube volume display
 - [ ] Favorites / recently watched
 - [ ] Better YouTube integration (or switch to a more robust web engine)
 - [ ] System tray support

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Saját Qt widgetek (panelek, csempék, listaelemek, animációk)."""
 from PyQt5.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRegion)
-from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
 from PyQt5.QtCore import (QRectF, QSize, QTimer, Qt, pyqtProperty, pyqtSignal)
 from tvbox.theme import _font, _label, set_translucent
 from tvbox import theme
@@ -351,6 +351,74 @@ class EqualizerBars(QWidget):
 
 
 # ===========================================================================
+# EPG-hez: egysoros, jobbra elidált felirat és vékony folyamatsáv
+# ===========================================================================
+class ElidedLabel(QLabel):
+    """Egysoros felirat, ami a szélességéhez igazítva "..."-ra vágja a hosszú
+    szöveget (a QLabel magától nem tud elidálni, és a hosszú műsorcím a
+    kártya/lista szélességét tolná szét)."""
+
+    def __init__(self, size=11, weight=QFont.Medium, color=None, parent=None):
+        super().__init__("", parent)
+        self._full = ""
+        self.setStyleSheet("color: %s; background: transparent;" % (color or theme.THEME.TEXT_DIM))
+        self.setFont(_font(size, weight))
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.setMinimumWidth(10)
+
+    def setFullText(self, text):
+        self._full = text or ""
+        self._apply()
+
+    def fullText(self):
+        return self._full
+
+    def resizeEvent(self, event):
+        self._apply()
+        super().resizeEvent(event)
+
+    def _apply(self):
+        elided = self.fontMetrics().elidedText(self._full, Qt.ElideRight, max(10, self.width()))
+        if elided != self.text():
+            super().setText(elided)
+
+
+class EpgProgressBar(QWidget):
+    """Vékony, saját magát rajzoló folyamatsáv a most futó műsor előrehaladásához."""
+
+    def __init__(self, parent=None, height=4):
+        super().__init__(parent)
+        set_translucent(self)
+        self._fraction = 0.0
+        self.setFixedHeight(height)
+
+    def set_fraction(self, value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            value = 0.0
+        value = 0.0 if value != value else max(0.0, min(1.0, value))     # NaN-védelem
+        if abs(value - self._fraction) > 0.004:
+            self._fraction = value
+            self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect())
+        radius = r.height() / 2
+        track = QPainterPath()
+        track.addRoundedRect(r, radius, radius)
+        painter.fillPath(track, QColor(255, 255, 255, 40))
+        if self._fraction > 0:
+            fill = QPainterPath()
+            fill.addRoundedRect(QRectF(r.left(), r.top(), max(r.height(), r.width() * self._fraction), r.height()),
+                                radius, radius)
+            painter.fillPath(fill, QColor(theme.THEME.ACCENT))
+
+
+
+# ===========================================================================
 # Menü / lista elemek
 # ===========================================================================
 class ChannelItemWidget(QWidget):
@@ -382,11 +450,29 @@ class ChannelItemWidget(QWidget):
                                   font=_font(13, QFont.Bold), fixed_size=(40, 40))
         layout.addWidget(self.badge)
 
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(1)
         self.name_label = _label(name, size=14, weight=QFont.Medium,
                                   color=theme.THEME.TEXT_DIM, wrap=True)
-        layout.addWidget(self.name_label, 1)
+        text_col.addWidget(self.name_label)
+        # EPG: a most futó műsor címe a név alatt (üres = rejtve, nem foglal helyet)
+        self.sub_label = ElidedLabel(size=10, weight=QFont.Medium, color=theme.THEME.TEXT_FAINT)
+        self.sub_label.hide()
+        text_col.addWidget(self.sub_label)
+        layout.addLayout(text_col, 1)
 
         self.set_current(is_current)
+
+    def set_subtitle(self, text):
+        """A név alatti kis sor (EPG: most futó műsor). Csak akkor nyúl a
+        widgethez, ha a szöveg ténylegesen változik - a listafrissítés így
+        olcsó marad."""
+        text = text or ""
+        if text == self.sub_label.fullText():
+            return
+        self.sub_label.setFullText(text)
+        self.sub_label.setVisible(bool(text))
 
     def set_current(self, is_current):
         """A csatorna 'ez van most lejátszva' kiemelését frissíti ANÉLKÜL,
@@ -460,24 +546,24 @@ class SettingsRowWidget(QWidget):
     balra/jobbra (vagy Enter) az érték léptetéséhez - ugyanaz a mintázat,
     mint a csatornalistánál (fókusz-kiemelést maga a widget rajzolja)."""
 
-    def __init__(self, label, value_text, parent=None):
+    def __init__(self, label, value_text, parent=None, height=46, name_pt=14, badge_pt=12):
         super().__init__(parent)
         set_translucent(self)
         self._focused = False
-        self.setFixedHeight(46)
+        self.setFixedHeight(height)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(18, 8, 18, 8)
+        layout.setSpacing(14)
 
-        self.name_label = _label(label, size=14, weight=QFont.Medium, color=theme.THEME.TEXT)
+        self.name_label = _label(label, size=name_pt, weight=QFont.Medium, color=theme.THEME.TEXT)
         layout.addWidget(self.name_label, 1)
 
         self.value_badge = TintedLabel(
             value_text, bg_color=QColor(theme.THEME.ACCENT.red(), theme.THEME.ACCENT.green(),
                                          theme.THEME.ACCENT.blue(), 60),
-            text_color=QColor(theme.THEME.TEXT), font=_font(12, QFont.Bold),
-            padding=(12, 5),
+            text_color=QColor(theme.THEME.TEXT), font=_font(badge_pt, QFont.Bold),
+            padding=(16, 7),
         )
         layout.addWidget(self.value_badge, 0, Qt.AlignRight)
 

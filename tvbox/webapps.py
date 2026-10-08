@@ -84,9 +84,7 @@ class WebAppMixin:
 
             if QWebEngineUrlRequestInterceptor is not None:
                 self.youtube_adblock_interceptor = YouTubeAdBlockInterceptor()
-                self.youtube_adblock_interceptor.set_enabled(
-                    self.settings_data.get("youtube_adblock", False)
-                )
+                self.youtube_adblock_interceptor.set_enabled(True)      # mindig be van kapcsolva
                 try:
                     view.page().profile().setUrlRequestInterceptor(
                         self.youtube_adblock_interceptor
@@ -113,9 +111,7 @@ class WebAppMixin:
     def _on_web_load_finished(self, ok):
         if not ok or self.web_view is None:
             return
-        if not self.settings_data.get("youtube_adblock", False):
-            return
-        if self.active_web_app != "youtube":
+        if self.active_web_app != "youtube":          # a reklámblokkoló mindig be van kapcsolva
             return
         try:
             self.web_view.page().runJavaScript(YOUTUBE_ADBLOCK_JS)
@@ -332,6 +328,12 @@ class WebAppMixin:
             self.external_watch_timer.stop()
 
     def _restore_after_external_app(self):
+        if getattr(self, "standby", False):
+            # Készenlétben bezárt külső alkalmazás: az ablakot visszaállítjuk, de a lejátszást
+            # NEM indítjuk el (a bekapcsolás - leave_standby - folytatja).
+            self.showNormal()
+            self.showFullScreen()
+            return
         # A showNormal() -> showFullScreen() sorrend azért kell, mert egy
         # minimalizált ablakot néhány ablakkezelő nem hoz vissza helyesen
         # közvetlenül teljes képernyőre showFullScreen()-nel egyedül.

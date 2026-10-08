@@ -19,6 +19,9 @@ from tvbox.webapps import WebAppMixin
 from tvbox.panels import PanelMixin
 from tvbox.input import InputMixin
 from tvbox.remote_ui import RemoteMixin
+from tvbox.epg import EpgMixin
+from tvbox.dimmer import DimMixin
+from tvbox.power import PowerMixin
 
 
 # A beépített (QtWebEngine) YouTube jelenleg ki van kapcsolva (WEB_APP_ORDER
@@ -69,7 +72,7 @@ def main():
     sys.exit(app.exec_())
 
 
-class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, InputMixin, RemoteMixin, QMainWindow):
+class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, InputMixin, RemoteMixin, EpgMixin, DimMixin, PowerMixin, QMainWindow):
 
     PANEL_WIDTH = 380
 
@@ -127,6 +130,11 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         saved_token = saved_settings_block.get("_remote_token")
         if isinstance(saved_token, str) and 10 <= len(saved_token) <= 64:
             self.settings_data["_remote_token"] = saved_token
+        saved_epg = saved_settings_block.get("_epg_source")
+        if isinstance(saved_epg, str) and 0 < len(saved_epg.strip()) <= 500:
+            self.settings_data["_epg_source"] = saved_epg.strip()
+        # EPG-forrás: a UI felépítése ELŐTT kell tudni (a kártyák magassága függ tőle).
+        self._resolve_epg_source_early()
 
         # A mentett témát MÁR ITT, a UI felépítése ELŐTT aktiváljuk, hogy
         # minden widget rögtön a helyes színekkel épüljön fel (ne kelljen
@@ -186,9 +194,10 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         self._build_help_card()
         self._build_remote_panel()
 
-        # A mentett fényerőt is alkalmazzuk (ha a kijelző támogatja - lásd
-        # _apply_brightness() a részletekért és a hiba-tűrésről).
-        self._apply_brightness(self.settings_data["brightness"])
+        # Készenléti mód és fényerő-fedőréteg (lásd power.py / dimmer.py). A mentett
+        # fényerőt a window megjelenése UTÁN alkalmazzuk (lásd main()).
+        self._init_power()
+        self._init_dim()
 
         # --- VLC előkészítése ---
         # FONTOS: az esemény-callbackeket (Playing/Error/Buffering) MÁR ITT,
@@ -213,6 +222,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         self.player_signals.ended.connect(self._on_stream_ended)
         self._init_playback_helpers()
         self._init_remote()
+        self._init_epg()
 
         try:
             em = self.player.event_manager()
@@ -305,6 +315,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
 
         self.setFocusPolicy(Qt.StrongFocus)
         self.showFullScreen()
+        self._apply_brightness(self.settings_data["brightness"])     # a fedőréteg a megjelenés UTÁN
         # A videó-kimenet (winId) beágyazása és az első csatorna elindítása
         # már NEM késleltetett timerrel történik - lásd a fenti magyarázatot
         # a callback-bekötésnél arról, hogy ez miért szüntet meg egy valódi
@@ -442,6 +453,18 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
             self.stop_remote()
         except Exception:
             pass
+        try:
+            self._stop_epg()
+        except Exception:
+            pass
+        try:
+            self._close_dim_overlay()
+        except Exception:
+            pass
+        try:
+            self.sysvol.stop()
+        except Exception:
+            pass
         for name in ("play_debounce_timer", "stall_timer", "retry_timer",
                      "buffer_card_timer", "watchdog_timer", "external_watch_timer"):
             try:
@@ -479,7 +502,8 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         if self.web_view is not None:
             self.web_view.setGeometry(0, 0, w, h)
 
-        card_w, card_h, margin = 480, 100, 28
+        margin = 28
+        card_w, card_h = self.info_card.width(), self.info_card.height()
         self.info_card.setGeometry(margin, h - card_h - margin, card_w, card_h)
 
         panel_w = self.PANEL_WIDTH
@@ -517,6 +541,7 @@ class TVBox(UIBuildMixin, PlayerMixin, MenuMixin, WebAppMixin, PanelMixin, Input
         hcw, hch = self.help_card.width(), self.help_card.height()
         self.help_card.move((w - hcw) // 2, (h - hch) // 2)
 
+        self._place_dim_overlay()
         super().resizeEvent(event)
 
 

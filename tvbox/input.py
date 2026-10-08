@@ -9,6 +9,8 @@ class InputMixin:
     # Egér: görgő = hangerő
     # ------------------------------------------------------------------
     def wheelEvent(self, event):
+        if self.standby:
+            return
         # A klasszikus egérgörgő egy "kattanása" 120 egység; ehhez képest
         # arányosan számoljuk a hangerő-változást, hogy egy érintőpad/nagy
         # felbontású görgő sok apró eseménye ne tudja gyorsan túllőni a
@@ -30,6 +32,11 @@ class InputMixin:
     def keyPressEvent(self, event):
         text = event.text()
         key_code = event.key()
+
+        # -- Készenléti mód: bármely billentyű felébreszt (és nem csinál mást) --
+        if self.standby:
+            self.leave_standby()
+            return
 
         # -- Telefonos távirányító QR-panel: N = új kód, bármi más becsukja --
         if self.remote_panel_visible:
@@ -107,6 +114,10 @@ class InputMixin:
 
         if text.lower() == "s":
             self.toggle_settings()
+            return
+
+        if text.lower() == "i" and not self.menu_visible:
+            self.show_epg_info()
             return
 
         if self.menu_visible:

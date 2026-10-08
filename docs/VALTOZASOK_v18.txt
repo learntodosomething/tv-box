@@ -139,3 +139,49 @@ ami felülírja az engedélyezőt; vagy hálózati elkülönítés / harmadik f�
    vagy az alkalmazás-specifikus szabály a hibás.
  - tools/remote_firewall_fix_blocks.bat/.ps1: a python-ra vonatkozó Block szabályok listázása,
    megerősítés után törlése.
+
+v20 - EPG, fényerő-fedőréteg, készenlét, beállítások telefonról
+=================================================================
+EPG (műsorújság)
+ - XMLTV (.xml / .xml.gz) forrás: TVBOX_EPG változó, a beállításfájl "_epg_source" kulcsa vagy ~/.tvbox/epg.xml(.gz).
+ - Háttérszálas betöltés, gyorsítótár, 12 órás frissítés; név szerinti egyeztetés (EPG_ALIASES); tools/epg_check.py.
+ - Info kártya (most + folyamatsáv + következő), műsorcím a listában és az előnézetben, 'I' gomb, telefonon is.
+ - Biztonsági korlátok (80 MB / 400 MB kicsomagolva / időkorlátok / 400 000 műsor); hibás XML nem akaszt, nem omlaszt.
+Beállítások
+ - KIKERÜLT: "Telefonos távirányító" és "YouTube reklámblokkoló" - mindig be vannak kapcsolva.
+   (A régi mentésekben maradt kulcsokat a betöltés figyelmen kívül hagyja. A reklámblokkoló csak a beépített
+   QtWebEngine-nézetre hat; a külön Brave-ablakot a Brave saját Shields-e védi.)
+ - A TV-s beállítás-panel nagyobb (a képernyő magasságához igazodó sormagasság és betűméret).
+ - A telefonon új "Beállítások" fül: minden beállítás ◀ ▶ gombokkal; a TV és a telefon ugyanazt mutatja.
+   Új parancs: {"cmd":"setting","key":...,"dir":-1|1}; a katalógus ("settings") és az állapot ("settings",
+   "settings_open") a telefon felé.
+Fényerő
+ - A fényerő most fekete, áttetsző fedőréteg a teljes képernyő előtt (100% = nincs sötétítés). Külön ablak, a VLC
+   natív videója és a kártyák fölött. X11 alatt az ablakkezelőt kikerülő ablak (az ablakkezelők a teljes képernyős
+   ablakot a "mindig felül" ablakok fölé teszik - ezt a valódi X11-es teszt fedte fel).
+ - Kompozitor nélküli X11-en a VLC saját fényerő-szűrője (csak a videót sötétíti). TVBOX_DIM=overlay|vlc felülbírálja.
+ - A /sys/class/backlight-os kód megszűnt (HDMI-monitoron nem csinált semmit).
+Készenlét (ki/bekapcsolás)
+ - Telefon: ⏻ gomb, 2 mp nyomva tartás -> készenlét (lejátszás leáll, külső YouTube-ablak bezárul, fekete képernyő,
+   X11 alatt xset dpms force off). Készenlétben a telefon nagy ⏻ gombja 2 mp-es nyomásra bekapcsol; a billentyűzeten
+   bármely gomb felébreszt. Készenlétben minden más parancs figyelmen kívül marad, a play_channel() is tiltott.
+ - Szerver-oldali védelem: {"cmd":"power","state":"on|off","held":ms} csak held >= 1800 esetén érvényes.
+ - A gép leállítása szándékosan nincs benne (utána a telefon nem érné el).
+Távirányító
+ - Mindig elindul a TV Box-szal (kell ahhoz, hogy a telefon készenlétből vissza tudjon kapcsolni).
+YouTube hangerő
+ - A hiba oka: a telefon és a TV a VLC hangerejét mutatta, a beépített YouTube viszont a <video> elem hangerejét
+   változtatta. Most a videó valódi hangereje (és némítása) kiolvasódik (másodpercenként is), a telefon ezt mutatja,
+   a TV-n hangerő-kártya jelenik meg. A YouTube-on belül állított hangerőt a telefon 1-2 mp-en belül követi.
+ - Külön Brave-ablakos módban a gép fő hangereje állítható (wpctl / pactl / amixer, Windows: pycaw, macOS: osascript),
+   háttérszálon, időkorláttal; a telefon a százalékot mutatja.
+Tesztek
+ - Új: test_epg, test_sysvol (kamu wpctl/pactl/amixer szkriptekkel), test_power_dim_settings (a valódi alkalmazással);
+   bővített test_remote_commands / test_remote_server; a stressz-teszt EPG-, készenlét-, fényerő- és HTTP-káoszt kap,
+   valódi VLC-hez helyi ffmpeg-streameket (--local-streams).
+ - Valódi környezetekben ellenőrizve: Xvfb + openbox (fedőréteg a teljes képernyős ablak fölött, készenléti fekete lap
+   a VLC-videó fölött), valódi VLC (fényerő-szűrő: fehér kép 100% -> 255, 50% -> 104, 20% -> 16), valódi QtWebEngine
+   helyi <video> oldallal (hangerő-visszaolvasás, OSD, készenlét YouTube-ból).
+ - NEM ellenőrizve: valódi kompozitor alatti áttetszőség, Windows (topmost, pycaw), Wayland, valódi telefon-böngésző
+   kinézete, a YouTube élő oldala, Raspberry Pi.
+

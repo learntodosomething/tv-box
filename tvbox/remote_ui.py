@@ -12,10 +12,12 @@ from PyQt5.QtGui import QColor, QFont, QKeyEvent, QPainter
 from PyQt5.QtWidgets import QApplication, QWidget
 from tvbox import theme
 from tvbox.compat import logger
+from tvbox.config import SETTINGS_SCHEMA
 from tvbox.external_apps import EXTERNAL_APPS, EXTERNAL_ORDER, WEB_APP_ORDER, WEB_APPS
 from tvbox.qrcode_min import make_qr
 from tvbox.remote import PORT_TRIES, RemoteServer, lan_ip, youtube_target
 from tvbox.remote_page import PAGE
+from tvbox.sysvol import SystemVolume
 from tvbox.theme import _label
 from tvbox.widgets import GlassPanel, TintedLabel
 
@@ -64,10 +66,15 @@ _KEYMAP = {
     "back": (Qt.Key_Backspace, "\x08"),
     "menu": (Qt.Key_M, "m"), "source": (Qt.Key_B, "b"),
     "settings": (Qt.Key_S, "s"), "help": (Qt.Key_H, "h"),
+    "info": (Qt.Key_I, "i"),
 }
-_JS_VOLUME = ("(function(d){var v=document.querySelector('video');if(!v)return;"
-              "v.muted=false;v.volume=Math.max(0,Math.min(1,v.volume+d));})(%s);")
-_JS_MUTE = "(function(){var v=document.querySelector('video');if(v)v.muted=!v.muted;})();"
+_JS_VOLUME = ("(function(d){var v=document.querySelector('video');if(!v)return null;"
+              "v.muted=false;v.volume=Math.max(0,Math.min(1,v.volume+d));"
+              "return [Math.round(v.volume*100),!!v.muted];})(%s);")
+_JS_MUTE = ("(function(){var v=document.querySelector('video');if(!v)return null;v.muted=!v.muted;"
+            "return [Math.round(v.volume*100),!!v.muted];})();")
+_JS_READ_VOLUME = ("(function(){var v=document.querySelector('video');"
+                   "return v?[Math.round(v.volume*100),!!v.muted]:null;})();")
 
 
 class RemoteMixin:
@@ -114,8 +121,13 @@ class RemoteMixin:
         self._remote_bridge.command.connect(self._on_remote_command)
         self.remote_timer = QTimer(self)
         self.remote_timer.timeout.connect(self._remote_tick)
-        if self.settings_data.get("remote_enabled"):
-            QTimer.singleShot(1000, self.start_remote)
+        # A rendszer-hangerő (a külön ablakos YouTube hangereje - lásd sysvol.py)
+        self.sysvol = SystemVolume()
+        # A beépített YouTube-nézet videójának hangereje: (százalék|None, némítva|None)
+        self._web_vol = (None, None)
+        self._web_vol_stamp = 0.0
+        # A telefonos távirányító MINDIG be van kapcsolva (nincs hozzá beállítás).
+        QTimer.singleShot(1000, self.start_remote)
 
     # ------------------------------------------------------------------
     # Szerver életciklus
@@ -140,6 +152,7 @@ class RemoteMixin:
                 lambda: self._remote_snapshot_data,
                 lambda: self._remote_catalog_cache,
                 PAGE,
+                get_epg=self.epg_remote_map,
             )
             server.start()
         except OSError as e:
@@ -158,21 +171,6 @@ class RemoteMixin:
         if server is not None:
             server.stop()
         self._remote_snapshot_data = {}
-
-    def _apply_remote_setting(self, enabled):
-        """A Beállítások 'Telefonos távirányító' sorának hatása."""
-        if enabled:
-            if not self.start_remote():
-                self.settings_data["remote_enabled"] = False      # a sor "Ki"-re áll vissza
-            QTimer.singleShot(0, self._open_remote_from_settings)
-        else:
-            self.stop_remote()
-            self.close_remote_panel()
-
-    def _open_remote_from_settings(self):
-        if self.settings_visible:
-            self.close_settings()
-        self.open_remote_panel()
 
     # ------------------------------------------------------------------
     # QR-panel
@@ -216,8 +214,8 @@ class RemoteMixin:
                 self.remote_status_label.setText("Nem sikerült elindítani a távirányítót.")
                 self.remote_url_label.setText(self._remote_error)
             else:
-                self.remote_status_label.setText("A telefonos távirányító ki van kapcsolva.")
-                self.remote_url_label.setText("Bekapcsolás: Beállítások → Telefonos távirányító")
+                self.remote_status_label.setText("A telefonos távirányító még nem indult el.")
+                self.remote_url_label.setText("Próbáld újra pár másodperc múlva (R)")
 
     def close_remote_panel(self):
         if not self.remote_panel_visible:
@@ -238,6 +236,9 @@ class RemoteMixin:
 
     def _remote_tick(self):
         try:
+            if self._youtube_external_running() and self.sysvol.available and self.sysvol.age() > 2.0:
+                self.sysvol.refresh()           # a gépen más (pl. a YouTube-ban) is állíthatták
+            self._poll_web_volume()
             self._remote_refresh_snapshot()
             server = self._remote_server
             if (self.remote_panel_visible and server is not None and not self._remote_connected_shown
@@ -267,6 +268,60 @@ class RemoteMixin:
             return "external"
         return "off"
 
+    # -- a beépített YouTube-nézet hangereje ---------------------------------
+    def _store_web_volume(self, result):
+        """A JS-ből visszaérkező [százalék, némítva] eltárolása (None = nincs <video> elem)."""
+        try:
+            if isinstance(result, (list, tuple)) and len(result) == 2:
+                self._web_vol = (max(0, min(100, int(result[0]))), bool(result[1]))
+                self._web_vol_stamp = time.monotonic()
+                return True
+        except (TypeError, ValueError):
+            pass
+        return False
+
+    def _on_web_volume_changed(self, result):
+        """Hangerő-parancs eredménye: eltároljuk, és a TV-n is megmutatjuk az OSD-t."""
+        if self._store_web_volume(result):
+            self._refresh_snapshot_soon()
+            self._show_web_volume_osd()
+
+    def _refresh_snapshot_soon(self):
+        try:
+            self._remote_refresh_snapshot()
+        except Exception as e:
+            logger.warning("Távirányító állapot-frissítés hiba: %s", e)
+
+    def _show_web_volume_osd(self):
+        volume, muted = self._web_vol
+        if volume is None:
+            return
+        if muted:
+            self.volume_caption.setText("Némítva")
+            self.volume_value.setText("--")
+            self.volume_bar.setValue(0)
+        else:
+            self.volume_caption.setText("Hangerő")
+            self.volume_value.setText("%d%%" % volume)
+            self.volume_bar.setValue(volume)
+        self._show_widget(self.volume_osd)
+        self.volume_hide_timer.start(1500)
+
+    def _poll_web_volume(self):
+        """Másodpercenként kiolvassuk a videó hangerejét (más úton - pl. a YouTube saját
+        csúszkájával - is változhat), hogy a telefon mindig a valós értéket mutassa."""
+        if not (self.active_web_app == "youtube" and self.web_view is not None):
+            self._web_vol = (None, None)
+            return
+        if time.monotonic() - self._web_vol_stamp < 1.0:
+            return
+        self._web_vol_stamp = time.monotonic()          # ne torlódjon, amíg a válasz úton van
+        self.web_view.page().runJavaScript(_JS_READ_VOLUME, self._store_web_volume)
+
+    def _youtube_external_running(self):
+        proc = self._external_processes.get("youtube")
+        return proc is not None and proc.poll() is None
+
     def _build_remote_catalog(self):
         modes, channels = [], {}
         for key, state in self.sources.items():
@@ -280,7 +335,9 @@ class RemoteMixin:
             app = WEB_APPS.get("youtube") or EXTERNAL_APPS.get("youtube") or {}
             modes.append({"key": "youtube", "icon": app.get("icon", "▶️"),
                           "label": app.get("label", "YouTube")})
-        return {"modes": modes, "channels": channels}
+        settings = [{"k": spec["key"], "l": spec["label"], "o": list(spec["labels"])}
+                    for spec in SETTINGS_SCHEMA]
+        return {"modes": modes, "channels": channels, "settings": settings}
 
     def _remote_refresh_snapshot(self):
         key = self.current_key
@@ -295,15 +352,35 @@ class RemoteMixin:
         pk = getattr(self, "_preview_key", None)
         if pk in self.channels:
             preview = {"key": pk, "name": self.channels[pk][0]}
+        yt_ext = self._youtube_external_running()
+        if self.active_web_app and self.web_view is not None:
+            # Beépített YouTube: a VIDEÓ hangereje (nem a VLC-é) - lásd _store_web_volume().
+            volume, muted = self._web_vol
+            vol_scope = "web"
+        elif yt_ext:
+            # Külön ablakos YouTube: a hangerő a GÉP fő hangereje (lásd sysvol.py).
+            volume, muted = self.sysvol.snapshot()
+            vol_scope = "system" if self.sysvol.available else "none"
+        else:
+            volume, muted, vol_scope = self.volume, bool(self.muted), "player"
+        settings_idx = {}
+        for spec in SETTINGS_SCHEMA:
+            val = self.settings_data.get(spec["key"])
+            settings_idx[spec["key"]] = spec["options"].index(val) if val in spec["options"] else 0
         self._remote_snapshot_data = {            # egyetlen értékadás = szálbiztos csere
             "mode": self.mode,
-            "active": self.active_web_app or self.mode,
+            "active": "youtube" if yt_ext else (self.active_web_app or self.mode),
             "now": {"key": key, "name": name},
-            "status": "web" if self.active_web_app else status,
-            "volume": self.volume,
-            "muted": bool(self.muted),
+            "status": "web" if (self.active_web_app or yt_ext) else status,
+            "volume": volume,
+            "muted": muted,
+            "vol_scope": vol_scope,
             "preview": preview,
             "youtube": self._youtube_availability(),
+            "epg": self.epg_state_snapshot(),
+            "standby": bool(self.standby),
+            "settings": settings_idx,
+            "settings_open": bool(self.settings_visible),
         }
 
     # ------------------------------------------------------------------
@@ -325,6 +402,11 @@ class RemoteMixin:
 
     def _handle_remote_command(self, cmd):
         kind = cmd.get("cmd")
+        if kind == "power":
+            self._remote_power(cmd["state"])
+            return
+        if self.standby:
+            return                                  # készenlétben csak a bekapcsolás él
         if self.remote_panel_visible:
             self.close_remote_panel()              # az első parancs bezárja a QR-panelt
         if kind == "key":
@@ -342,6 +424,8 @@ class RemoteMixin:
             self._remote_mode(cmd["mode"])
         elif kind == "channel":
             self._remote_channel(cmd["mode"], cmd["key"])
+        elif kind == "setting":
+            self._remote_step_setting(cmd["key"], cmd["dir"])
         elif kind == "youtube":
             self._remote_youtube(cmd["text"])
 
@@ -372,8 +456,8 @@ class RemoteMixin:
             if name == "help":
                 self.open_help()
                 return
-            if name == "menu":
-                return                              # webnézetben nincs csatornalista
+            if name in ("menu", "info"):
+                return                              # webnézetben nincs csatornalista / műsorinfó
         # A telefonról SOHA nem lehet kilépni a programból (a kanapéról nem indítható újra):
         # az Esc csak bezár - menüt, panelt, előnézetet. Szabad állapotban nem csinál semmit.
         if name == "esc" and not self._modal_open() and self._preview_key is None:
@@ -382,14 +466,22 @@ class RemoteMixin:
         self._remote_press(key, text)
 
     def _remote_volume(self, delta):
-        if self.active_web_app and self.web_view is not None:
-            self.web_view.page().runJavaScript(_JS_VOLUME % (delta / 100.0))
+        if self._youtube_external_running():
+            if self.sysvol.available:
+                if self.sysvol.snapshot()[0] is None:
+                    self.sysvol.refresh()           # első használat: előbb olvassuk be a jelenlegit
+                self.sysvol.change(delta)
+        elif self.active_web_app and self.web_view is not None:
+            self.web_view.page().runJavaScript(_JS_VOLUME % (delta / 100.0), self._on_web_volume_changed)
         else:
             self._change_volume(delta)
 
     def _remote_mute(self):
-        if self.active_web_app and self.web_view is not None:
-            self.web_view.page().runJavaScript(_JS_MUTE)
+        if self._youtube_external_running():
+            if self.sysvol.available:
+                self.sysvol.toggle_mute()
+        elif self.active_web_app and self.web_view is not None:
+            self.web_view.page().runJavaScript(_JS_MUTE, self._on_web_volume_changed)
         else:
             self._toggle_mute()
 
